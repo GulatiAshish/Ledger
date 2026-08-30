@@ -9,17 +9,35 @@ Offline-first PWA. All data stays on the phone. Zero runtime dependencies except
 The app **must** be served over HTTPS or Android won't offer a real install. GitHub Pages is free and takes five minutes.
 
 1. Create a public repo, e.g. `ledger`.
-2. Upload all six files to the repo root: `index.html`, `manifest.webmanifest`, `sw.js`, `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`.
+2. Upload **all ten files**, keeping this exact layout — `fonts/` must be a real folder, not renamed files:
+
+```
+index.html                  the whole app
+sw.js                       service worker (offline)
+manifest.webmanifest        install config
+icon-192.png                app icon
+icon-512.png                app icon
+icon-maskable-512.png       adaptive icon
+shortcut-add.png            long-press menu
+shortcut-log.png            long-press menu
+shortcut-trends.png         long-press menu
+fonts/archivo-var.woff2     self-hosted font
+fonts/plexmono-400.woff2    self-hosted font
+fonts/plexmono-600.woff2    self-hosted font
+```
+
 3. Repo → **Settings → Pages** → Source: `Deploy from a branch` → Branch: `main` / root → Save.
-4. Wait ~60s. Your URL is `https://<username>.github.io/ledger/`.
+4. Wait ~60s. Your URL is `https://<username>.github.io/<RepoName>/` — matching your repo's capitalisation exactly.
 5. Open it in **Chrome on Android** → menu (⋮) → **Install app** / *Add to Home screen*.
 6. Launch from the home-screen icon (not the browser tab). Go to **More → Persistent storage → Request**. It should read *Granted*.
 
 Step 6 matters. It's what stops Chrome from evicting your data under storage pressure. Installed PWAs almost always get it.
 
-Upload the `fonts/` folder too — it must sit next to `index.html`.
+**Replacing an earlier version:** overwrite `index.html`, `sw.js` and `manifest.webmanifest`, and add the `fonts/` folder and three `shortcut-*.png` files. Nothing needs deleting — no file from the first version has been removed or renamed.
 
-**Redeploying:** bump `CACHE = 'ledger-v4'` to `'ledger-v5'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
+**Case sensitivity:** the username part of a GitHub Pages URL is case-insensitive (domains are), but **the repository name in the path is not**. A repo called `Ledger` is served only at `https://<username>.github.io/Ledger/`; the lowercase spelling 404s. Every path in this app is relative (`./index.html`, `scope: "./"`, bare filenames), so it runs correctly at any path with any casing — you just have to type the URL the way the repo is actually named.
+
+**Redeploying:** bump `CACHE = 'ledger-v5'` to `'ledger-v6'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
 
 ---
 
@@ -45,6 +63,58 @@ The whole install is ~152 KB. `grep -oE 'https?://' index.html` returns nothing 
 *Weak signal used to be worse than no signal.* The original service worker was network-first on navigation. Fully offline that's fine — `fetch` rejects fast and the cache answers. But on a flaky connection (patchy 4G, a shop-floor dead spot, a captive-portal wifi) `fetch` can hang for tens of seconds before it rejects, so the app would have opened *slower on a bad connection than with none at all*. It's now cache-first with background revalidation: it opens instantly in every network condition, and picks up a new deploy on the following launch.
 
 You can verify it yourself: open the app, put the phone in aeroplane mode, force-close it, reopen. It should launch and record normally. **More → Offline readiness** reports whether the service worker is active.
+
+---
+
+## 1b. Home screen: shortcuts, not a widget
+
+**A web app cannot create an Android home screen widget.** There is a `widgets` member in the Web App Manifest spec, but it's Microsoft's, and it targets the Windows 11 Widgets Board only. Chrome on Android doesn't implement it. No PWA on any platform can produce a home screen widget today.
+
+**And the widget you're picturing doesn't exist natively either.** Android widgets are built from `RemoteViews`, which supports a fixed, small set of view classes — `FrameLayout`, `LinearLayout`, `RelativeLayout`, `TextView`, `Button`, `ImageButton`, `ImageView`, `ProgressBar`, `AnalogClock`, `Chronometer`, plus collection views. **`EditText` is not on that list.** Widgets that appear to have a text box — the Google Search bar is the famous one — are an `ImageView` drawn to look like a field; tapping it launches a full activity with the keyboard. Nobody types into a home screen widget, because the platform doesn't allow it.
+
+So what you actually want — *tap something on the home screen, keyboard is up, type, done* — is a shortcut into a focused input. That's achievable today, with no native code.
+
+**Three shortcuts are now in the manifest.** Long-press the Ledger icon and you get Add expense / Today's log / Trends. Long-press **Add expense** and drag it onto the home screen, and it becomes its own standalone icon that opens directly into the entry field. One tap from the home screen to typing.
+
+**Plus a share target,** which is arguably better than a widget for your case. Ledger now appears in Android's share sheet. Select the text of a payment SMS or UPI notification, share it to Ledger, and it lands in the parser pre-filled:
+
+- share `swiggy dinner 480` → ₹480, Food
+- share `Paid Rs 2500 to HP petrol` → ₹2,500, Fuel
+
+**Because you already installed the app, this needs a nudge.** Shortcuts are baked into the WebAPK at install time. Chrome re-checks the manifest roughly once a day and can take a couple of days to rebuild the app. To get them immediately: uninstall Ledger from the home screen, reload the page in Chrome, and install again. Your data is in IndexedDB keyed to the origin, not to the installed app — **but export a backup from More first anyway**, because uninstalling a PWA can clear site data on some Android versions.
+
+If you later want a true widget — a home screen tile showing this month's total with quick-add buttons — that arrives with the native step in §7: Bubblewrap wraps this same PWA in a TWA, and you add a Kotlin `AppWidgetProvider` beside it. The widget would show numbers and buttons; tapping still opens an input. That's the ceiling on Android, not a limitation of this app.
+
+---
+
+## 1c. Backup and moving to a new phone
+
+Two separate things, with very different risk.
+
+**The app code** lives in your GitHub repo. Safe indefinitely, needs no thought.
+
+**Your expenses** exist in one place: IndexedDB on the phone. There is no cloud copy. Until you export, the phone *is* the database.
+
+Recovery on a new phone:
+
+1. Chrome → your URL → **Install app**
+2. **More → Import** → pick your backup JSON
+3. **More → Persistent storage → Request**
+
+Import merges by `id` with newest-`updated_at` winning, so it is never destructive — you can safely import an old backup onto a phone that already has newer data.
+
+The backup contains every entry (including soft-deleted ones), your categories, and the learned categoriser rules, so your trained auto-categorisation comes back too, not just the numbers. **CSV is not a backup** — only the JSON re-imports; CSV is for Excel and for loading into Postgres later.
+
+**What actually destroys the data:**
+
+- Losing the phone with no recent export. Everything since that export is gone.
+- Clearing Chrome's *Cookies and site data*.
+- Uninstalling the PWA — clears site data on some Android versions.
+- Changing your **GitHub username**, or moving to a **custom domain**.
+
+**What does not:** renaming the repo, or a difference in URL casing. An origin is scheme + host + port — the path is not part of it. Your origin is `https://<username>.github.io`, so everything under it shares one IndexedDB regardless of the path.
+
+That last point has a security corollary: **every project site on your GitHub account shares that origin**, and any page hosted there can read this app's database. Fine for a personal account; don't host untrusted code on it.
 
 ---
 
