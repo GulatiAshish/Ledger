@@ -1,6 +1,6 @@
 /* Ledger service worker.
    Bump CACHE when you change any file below, otherwise the phone keeps the old copy. */
-const CACHE = 'ledger-v4';
+const CACHE = 'ledger-v6';
 
 /* Everything the app needs to run. There are no other network calls anywhere —
    fonts are self-hosted, charts are inline SVG, storage is IndexedDB. */
@@ -19,7 +19,9 @@ const CORE = [
 self.addEventListener('install', e => {
   self.skipWaiting();
   // addAll is atomic: if any file 404s the whole install fails, so a broken
-  // deploy is loud instead of silently half-cached.
+  // deploy is loud instead of silently half-cached. Only files the running app
+  // actually needs go in here — the launcher reads shortcut icons itself, so
+  // listing them would just mean a forgotten upload takes offline down with it.
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)));
 });
 
