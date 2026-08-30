@@ -37,7 +37,7 @@ Step 6 matters. It's what stops Chrome from evicting your data under storage pre
 
 **Case sensitivity:** the username part of a GitHub Pages URL is case-insensitive (domains are), but **the repository name in the path is not**. A repo called `Ledger` is served only at `https://<username>.github.io/Ledger/`; the lowercase spelling 404s. Every path in this app is relative (`./index.html`, `scope: "./"`, bare filenames), so it runs correctly at any path with any casing — you just have to type the URL the way the repo is actually named.
 
-**Redeploying:** bump `CACHE = 'ledger-v5'` to `'ledger-v6'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
+**Redeploying:** bump `CACHE = 'ledger-v6'` to `'ledger-v7'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
 
 ---
 
@@ -94,6 +94,8 @@ Two separate things, with very different risk.
 **The app code** lives in your GitHub repo. Safe indefinitely, needs no thought.
 
 **Your expenses** exist in one place: IndexedDB on the phone. There is no cloud copy. Until you export, the phone *is* the database.
+
+Use **More → Back up to Drive**, not *Export*. Export writes to the phone's downloads folder, which dies with the phone — so it isn't really a backup. Back up to Drive opens Android's share sheet and pushes the file off the device entirely. Same file either way; only one of them survives losing the phone.
 
 Recovery on a new phone:
 
@@ -213,32 +215,20 @@ The last five sit behind one disclosure toggle, keeping the default view to one 
 
 ---
 
+## 4b. Categories
+
+17 seeded categories, and you can now add, rename, recolour and hide your own from **More → Manage categories**.
+
+The rule that matters: **a category in use cannot be deleted, only hidden.** Expenses reference categories by `category_id`, so deleting one that's still referenced would orphan every entry pointing at it — the crash class this app can least afford, since it would take out the Log and Trends tabs at once. Hiding removes it from the picker for new expenses while every historical entry keeps resolving normally. Delete is offered only when usage is zero.
+
+One related detail: if you edit an old expense whose category has since been hidden, that category still appears in the picker, marked `HIDDEN`, so opening the entry can't silently reassign it.
+
+---
+
 ## 5. How the categoriser works
 
 No API call, no key, works offline.
 
 1. **Seed keywords** — ~250 India-first terms (`swiggy`, `dmart`, `fastag`, `jio`, `apollo`, `bookmyshow`). Cold-start priors only.
 2. **Learned rules** — every time you *manually pick* a category, each significant word in the description gets a +1 vote for that category, stored in the `rules` table. Learned votes are weighted 3× over seeds.
-3. So `client lunch at Blue Diamond` gets categorised as Food the first time by the word "lunch"; correct it to **Business** twice and `blue`, `diamond` and `client` permanently outrank the seed.
-
-It only learns from confirmed choices, never from its own guesses — otherwise it reinforces its own mistakes.
-
----
-
-## 6. Recurring detection
-
-Group entries by a two-token description signature → require **≥3 occurrences** → take the median gap between them → match against weekly / fortnightly / monthly / quarterly / half-yearly / yearly with per-cadence tolerance → require ≥60% of gaps within tolerance and amount coefficient-of-variation ≤0.45.
-
-Output: cadence, mean amount, normalised monthly cost, next expected date, and an **overdue** flag when something's late — which means either you forgot to log it, or the subscription lapsed. The sum of all normalised monthly costs is your fixed baseline: what leaves your account before you decide anything.
-
-Expect roughly two months of data before it's useful.
-
----
-
-## 7. Roadmap
-
-**v2 — Spring Boot + Postgres replica.** Push-only sync: phone stays the source of truth, backend is a durable replica with real constraints. `POST /sync` takes rows where `updated_at > last_sync`, upserts on `id` with last-write-wins. Add it *after* the schema has survived two months of real use, because it will change.
-
-**v3 — Kotlin native.** Room uses the DDL above verbatim. Migration is a one-time JSON import.
-
-Don't build v2 until v1 has real data in it. The schema is the thing worth getting right, and only daily use tells you where it's wrong.
+3. So `client lunch at Blue Diamond` gets categor
