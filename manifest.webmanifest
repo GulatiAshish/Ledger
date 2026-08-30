@@ -1,0 +1,20 @@
+{
+  "name": "Ledger — Daily Expenses",
+  "short_name": "Ledger",
+  "description": "Offline-first daily expense tracker with trend analysis and recurring-payment detection.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E0F12",
+  "theme_color": "#0E0F12",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Add expense", "short_name": "Add", "url": "./index.html" }
+  ]
+}

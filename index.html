@@ -1,0 +1,1513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<title>Ledger</title>
+<meta name="theme-color" content="#0E0F12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* Self-hosted. No CDN, no network call, no FOUT — the app is byte-complete offline. */
+@font-face{font-family:'Archivo';src:url('fonts/archivo-var.woff2') format('woff2-variations');
+  font-weight:400 700;font-display:swap;font-style:normal}
+@font-face{font-family:'IBM Plex Mono';src:url('fonts/plexmono-400.woff2') format('woff2');
+  font-weight:400;font-display:swap;font-style:normal}
+@font-face{font-family:'IBM Plex Mono';src:url('fonts/plexmono-600.woff2') format('woff2');
+  font-weight:600;font-display:swap;font-style:normal}
+:root{
+  --bg:#0E0F12; --surf:#16181D; --surf2:#1D2027; --surf3:#252932;
+  --line:#282C35; --line2:#3A404C;
+  --ink:#EAE7E1; --mute:#A3AAB8; --dim:#858C9A;
+  --hot:#FF7A3D; --hot2:#FF9A66; --hotdim:#4A2314;
+  --good:#6ECFA6; --bad:#FF6B6E;
+  --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --sans:'Archivo','Helvetica Neue',Helvetica,sans-serif;
+  --nav:66px;
+  --tap:44px;               /* WCAG 2.2 SC 2.5.5 (AAA) minimum target */
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:15px;line-height:1.45;overscroll-behavior-y:none;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.5;
+  background:radial-gradient(120% 60% at 50% -10%,rgba(255,106,43,.10),transparent 60%);
+}
+#app{position:relative;z-index:1;min-height:100%;padding-bottom:calc(var(--nav) + env(safe-area-inset-bottom));}
+button{font-family:inherit;color:inherit;background:none;border:none;padding:0;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);background:none;border:none;outline:none;width:100%}
+
+/* ---------- primitives ---------- */
+.lbl{font-size:10px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.hair{height:1px;background:var(--line);border:0;margin:0}
+.pad{padding:0 18px}
+.hd{position:sticky;top:0;z-index:20;background:rgba(14,15,18,.92);backdrop-filter:blur(14px);
+    border-bottom:1px solid var(--line);padding:calc(env(safe-area-inset-top) + 12px) 18px 12px;}
+.hd h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.02em}
+.hd .sub{margin-top:2px}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:14px}
+.chip{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 14px;min-height:var(--tap);
+      border-radius:999px;border:1px solid var(--line2);background:var(--surf2);
+      font-size:13.5px;font-weight:600;white-space:nowrap}
+.chip.on{background:var(--hotdim);border-color:var(--hot);color:var(--hot2)}
+:focus-visible{outline:2px solid var(--hot);outline-offset:2px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+.dot{width:8px;height:8px;border-radius:2px;flex:none}
+.scrollx{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:0 18px}
+.scrollx::-webkit-scrollbar{display:none}
+.muted{color:var(--mute)}.dimc{color:var(--dim)}
+.hot{color:var(--hot)}.good{color:var(--good)}.bad{color:var(--bad)}
+.empty{text-align:center;color:var(--dim);padding:44px 24px;font-size:14px}
+
+/* ---------- add view ---------- */
+.tape{display:flex;align-items:baseline;justify-content:space-between;padding:14px 18px 10px}
+.tape .big{font-family:var(--mono);font-size:15px;font-weight:600}
+.amtwrap{padding:18px 18px 6px;text-align:right;position:relative}
+.amt{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:clamp(44px,15vw,60px);
+     font-weight:600;letter-spacing:-.03em;line-height:1;word-break:break-all}
+.amt .cur{color:var(--dim);font-size:.5em;font-weight:500;margin-right:8px;vertical-align:.25em}
+.amt.zero{color:var(--dim)}
+.fields{padding:6px 18px 0}
+.frow{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding:13px 0}
+.frow .lbl{flex:none;width:52px}
+#desc::placeholder{color:var(--dim)}
+.gu{display:flex;gap:8px;align-items:center;padding:12px 0 2px;flex-wrap:wrap}
+.quickin{width:100%;height:54px;margin-top:7px;padding:0 15px;border-radius:13px;
+  background:var(--surf);border:1px solid var(--line2);font-size:17px;font-weight:500}
+.quickin:focus{border-color:var(--hot);background:var(--surf2)}
+.quickin::placeholder{color:var(--dim)}
+.hint{font-size:12px;color:var(--mute);line-height:1.55;margin-top:9px}
+.hint b{color:var(--ink);font-weight:600}
+.tag{font-size:9.5px;font-weight:700;letter-spacing:.12em;color:var(--dim)}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 18px 10px}
+.key{height:52px;border-radius:11px;background:var(--surf);border:1px solid var(--line);
+     font-family:var(--mono);font-size:22px;font-weight:400;display:flex;align-items:center;justify-content:center;
+     transition:background .09s,transform .09s}
+.key:active{background:var(--surf3);transform:scale(.96)}
+.save{margin:6px 18px 20px;height:56px;width:calc(100% - 36px);border-radius:14px;background:var(--hot);color:#140A05;
+      font-size:16px;font-weight:700;letter-spacing:.03em;display:flex;align-items:center;justify-content:center;gap:10px;
+      transition:transform .1s,opacity .15s}
+.save:active{transform:scale(.985)}
+.save[disabled]{background:var(--surf2);color:var(--dim);border:1px solid var(--line)}
+.recent{padding:0 18px 12px}
+.rrow{display:flex;align-items:center;gap:10px;width:100%;min-height:var(--tap);text-align:left;
+  padding:9px 0;border-bottom:1px dashed var(--line);font-size:13.5px}
+.rrow .rd{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- log ---------- */
+.daygrp{margin-top:16px}
+.dayhd{display:flex;justify-content:space-between;align-items:baseline;padding:0 18px 7px}
+.erow{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);
+      background:linear-gradient(var(--surf),var(--surf))}
+.erow:active{background:var(--surf2)}
+.erow .body{flex:1;min-width:0}
+.erow .t{font-size:14.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.erow .m{font-size:11px;color:var(--dim);margin-top:2px;letter-spacing:.04em;text-transform:uppercase;font-weight:600}
+.erow .v{font-family:var(--mono);font-size:15px;font-weight:600;flex:none}
+
+/* ---------- insights ---------- */
+.sec{margin:20px 18px}
+.sec>.lbl{margin-bottom:10px;display:block}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:12px 13px}
+.kpi .v{font-family:var(--mono);font-size:21px;font-weight:600;letter-spacing:-.02em;margin-top:5px}
+.kpi .d{font-size:11.5px;margin-top:3px;font-weight:600}
+.bar{margin:11px 0}
+.bar .top{display:flex;justify-content:space-between;align-items:baseline;font-size:13.5px;gap:8px}
+.bar .track{height:7px;background:var(--surf2);border-radius:4px;margin-top:6px;overflow:hidden}
+.bar .fill{height:100%;border-radius:4px;background:var(--hot);transition:width .5s cubic-bezier(.2,.8,.2,1)}
+svg .grid{stroke:var(--line);stroke-width:1}
+svg .axis{fill:var(--mute);font-size:9.5px;font-family:var(--mono);letter-spacing:.02em}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--mute);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:2px;vertical-align:middle;margin-right:5px}
+
+.split{display:flex;flex-direction:column;gap:10px}
+.splitbar{display:flex;height:12px;border-radius:6px;overflow:hidden;gap:2px}
+.splitrow{display:flex;justify-content:space-between;align-items:center;font-size:13.5px;font-weight:500}
+.splitrow span:first-child{display:flex;align-items:center;gap:8px}
+.splitrow .num{font-weight:600}
+.sparkrow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:10px 0;border-bottom:1px dashed var(--line)}
+.sparkrow:last-child{border-bottom:0}
+.sparkmeta{min-width:0;flex:1}
+.sparkmeta .t{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sparkmeta .s{font-size:11.5px;color:var(--mute);margin-top:2px}
+.oddrow{display:flex;width:100%;text-align:left;align-items:center;justify-content:space-between;gap:12px;
+  min-height:var(--tap);padding:11px 0;border-bottom:1px dashed var(--line)}
+.oddrow:last-child{border-bottom:0}
+.oddrow .t{font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.oddrow .s{font-size:11px;color:var(--mute);margin-top:2px}
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 10px}
+.statgrid .v{font-family:var(--mono);font-size:18px;font-weight:600;margin-top:4px}
+
+/* ---------- recurring ---------- */
+.rec{padding:13px 14px;border-radius:12px;background:var(--surf);border:1px solid var(--line);margin-bottom:10px}
+.rec .h{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.rec .n{font-size:14.5px;font-weight:600;text-transform:capitalize;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;font-size:11px;color:var(--mute)}
+.rec .meta span{background:var(--surf2);border:1px solid var(--line);padding:3px 8px;border-radius:6px;font-weight:600}
+.rec.due{border-color:var(--hot)}
+
+/* ---------- nav ---------- */
+nav{position:fixed;left:0;right:0;bottom:0;z-index:30;height:calc(var(--nav) + env(safe-area-inset-bottom));
+    padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(5,1fr);
+    background:rgba(14,15,18,.94);backdrop-filter:blur(14px);border-top:1px solid var(--line)}
+nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--dim);height:var(--nav)}
+nav button.on{color:var(--hot)}
+nav svg{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+
+/* ---------- sheet ---------- */
+.veil{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.62);backdrop-filter:blur(3px);
+      display:flex;align-items:flex-end;animation:fade .18s ease}
+@keyframes fade{from{opacity:0}}
+.sheet{width:100%;max-height:88vh;overflow:auto;background:var(--surf);border-radius:20px 20px 0 0;
+       border-top:1px solid var(--line2);padding:8px 0 calc(20px + env(safe-area-inset-bottom));
+       animation:up .26s cubic-bezier(.2,.9,.25,1)}
+@keyframes up{from{transform:translateY(100%)}}
+.grab{width:38px;height:4px;background:var(--line2);border-radius:2px;margin:8px auto 14px}
+.sheet h3{margin:0 18px 14px;font-size:16px;font-weight:700}
+.catgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 18px}
+.catbtn{display:flex;align-items:center;gap:9px;padding:12px;min-height:52px;border-radius:11px;background:var(--surf2);
+        border:1px solid var(--line);font-size:13.5px;font-weight:600;text-align:left}
+.catbtn.on{border-color:var(--hot);background:var(--hotdim)}
+.act{display:flex;gap:10px;padding:16px 18px 0}
+.act button{flex:1;height:48px;border-radius:12px;font-weight:700;font-size:14.5px;border:1px solid var(--line2);background:var(--surf2)}
+.act .prim{background:var(--hot);color:#140A05;border-color:var(--hot)}
+.act .del{color:var(--bad);border-color:#4A1F21;background:#231416}
+
+.swipe{touch-action:pan-y}
+.more{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 36px);margin:4px 18px 0;
+  min-height:var(--tap);border-radius:11px;border:1px dashed var(--line2);color:var(--mute);font-size:13px;font-weight:600}
+.pill{display:inline-block;padding:2px 7px;border-radius:5px;background:var(--surf2);border:1px solid var(--line);
+  font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--mute)}
+
+/* ---------- misc ---------- */
+.banner{margin:12px 18px;padding:11px 13px;border-radius:11px;font-size:12.5px;line-height:1.4;
+        background:var(--hotdim);border:1px solid var(--hot);color:#FFC0A2}
+.banner.warn{background:#231416;border-color:#4A1F21;color:#F0A9AB}
+.setrow{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:15px 18px;border-bottom:1px solid var(--line)}
+.setrow .t{font-size:14.5px;font-weight:500}
+.setrow .s{font-size:11.5px;color:var(--dim);margin-top:2px}
+.setrow button{min-height:var(--tap);padding:0 16px;border-radius:9px;background:var(--surf2);border:1px solid var(--line2);font-size:12.5px;font-weight:700;flex:none}
+.toast{position:fixed;left:50%;bottom:calc(var(--nav) + 22px + env(safe-area-inset-bottom));transform:translateX(-50%);
+       display:flex;align-items:center;gap:14px;max-width:calc(100vw - 32px);
+       background:var(--surf3);border:1px solid var(--line2);padding:0 8px 0 17px;min-height:48px;border-radius:999px;
+       font-size:13px;font-weight:600;z-index:60;animation:tin .22s ease;white-space:nowrap;box-shadow:0 8px 28px rgba(0,0,0,.5)}
+.toast .undo{min-height:36px;padding:0 15px;border-radius:999px;background:var(--hot);color:#140A05;font-weight:700;font-size:13px}
+@keyframes tin{from{opacity:0;transform:translate(-50%,10px)}}
+.seg{display:flex;gap:6px;padding:0 18px;margin-bottom:4px}
+.seg button{flex:1;min-height:var(--tap);border-radius:10px;background:var(--surf);border:1px solid var(--line);
+  font-size:13px;font-weight:700;color:var(--mute)}
+.seg button.on{background:var(--hotdim);border-color:var(--hot);color:var(--hot2)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<nav id="nav" aria-label="Main"></nav>
+
+<script>
+'use strict';
+/* ══════════════════ 0. UTIL ══════════════════ */
+const $=(s,r=document)=>r.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));
+const now=()=>new Date().toISOString();
+const pad2=n=>String(n).padStart(2,'0');
+const dstr=d=>d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate());
+const today=()=>dstr(new Date());
+const parseD=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);};
+const daysBetween=(a,b)=>Math.round((parseD(b)-parseD(a))/864e5);
+const addDays=(s,n)=>{const d=parseD(s);d.setDate(d.getDate()+n);return dstr(d);};
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DOW=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const money=n=>{const v=Math.round(n||0);return v.toLocaleString('en-IN');};
+const money2=n=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const monKey=s=>s.slice(0,7);
+const monLabel=k=>{const[y,m]=k.split('-');return MON[+m-1]+" '"+y.slice(2);};
+const dayLabel=s=>{const d=parseD(s),t=today();
+  if(s===t)return'Today';if(s===addDays(t,-1))return'Yesterday';
+  return DOW[d.getDay()]+', '+d.getDate()+' '+MON[d.getMonth()]+(monKey(s)!==monKey(t)?' '+d.getFullYear():'');};
+
+function toast(msg){const o=$('.toast');if(o)o.remove();
+  const e=document.createElement('div');e.className='toast';e.textContent=msg;document.body.appendChild(e);
+  setTimeout(()=>e.remove(),1900);}
+function buzz(ms=8){try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}}
+
+/* NN/g: don't spend confirmation dialogs on routine actions — they get
+   click-through fatigue and stop working. Offer recovery instead. Deletes are
+   already soft, so undo is a one-field flip. */
+function toastUndo(msg,onUndo){
+  const o=$('.toast');if(o)o.remove();
+  const e=document.createElement('div');e.className='toast';e.setAttribute('role','status');
+  e.innerHTML=`<span>${esc(msg)}</span><button class="undo">Undo</button>`;
+  document.body.appendChild(e);
+  const kill=setTimeout(()=>e.remove(),6000);
+  e.querySelector('.undo').onclick=()=>{clearTimeout(kill);e.remove();onUndo();};
+}
+
+/* ══════════════════ 1. STORAGE ══════════════════
+   IndexedDB, schema shaped exactly like the SQL you'll port to Postgres/Room.
+   Falls back to an in-memory store if IDB is blocked (e.g. sandboxed preview). */
+const SCHEMA_VERSION=1;
+const DB={
+  db:null, mem:null,
+  async open(){
+    try{
+      this.db=await new Promise((res,rej)=>{
+        const r=indexedDB.open('ledger',SCHEMA_VERSION);
+        r.onerror=()=>rej(r.error);
+        r.onblocked=()=>rej(new Error('blocked'));
+        r.onupgradeneeded=e=>{
+          const db=e.target.result;
+          if(!db.objectStoreNames.contains('expenses')){
+            const s=db.createObjectStore('expenses',{keyPath:'id'});
+            s.createIndex('by_date','spent_on');
+            s.createIndex('by_cat','category_id');
+          }
+          if(!db.objectStoreNames.contains('categories'))db.createObjectStore('categories',{keyPath:'id'});
+          if(!db.objectStoreNames.contains('rules'))db.createObjectStore('rules',{keyPath:'token'});
+          if(!db.objectStoreNames.contains('meta'))db.createObjectStore('meta',{keyPath:'k'});
+        };
+        r.onsuccess=()=>res(r.result);
+        setTimeout(()=>rej(new Error('timeout')),4000);
+      });
+    }catch(err){
+      console.warn('IndexedDB unavailable, using volatile memory store:',err);
+      this.mem={expenses:new Map(),categories:new Map(),rules:new Map(),meta:new Map()};
+    }
+    return !!this.db;
+  },
+  _tx(store,mode){return this.db.transaction(store,mode,{durability:'strict'});},
+  async all(store){
+    if(this.mem)return[...this.mem[store].values()];
+    return new Promise((res,rej)=>{const r=this._tx(store,'readonly').objectStore(store).getAll();
+      r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error);});
+  },
+  async get(store,key){
+    if(this.mem)return this.mem[store].get(key)||null;
+    return new Promise((res,rej)=>{const r=this._tx(store,'readonly').objectStore(store).get(key);
+      r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error);});
+  },
+  /* atomic multi-record put: all rows land or none do */
+  async put(store,rows){
+    rows=Array.isArray(rows)?rows:[rows];
+    if(this.mem){rows.forEach(r=>this.mem[store].set(r[keyOf(store)],r));return;}
+    return new Promise((res,rej)=>{
+      const tx=this._tx(store,'readwrite'),os=tx.objectStore(store);
+      rows.forEach(r=>os.put(r));
+      tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);tx.onabort=()=>rej(tx.error);
+    });
+  },
+  async del(store,key){
+    if(this.mem){this.mem[store].delete(key);return;}
+    return new Promise((res,rej)=>{const tx=this._tx(store,'readwrite');
+      tx.objectStore(store).delete(key);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error);});
+  }
+};
+const keyOf=s=>s==='rules'?'token':s==='meta'?'k':'id';
+
+/* Durability: ask the browser to never evict us. Granted for installed PWAs. */
+async function requestPersist(){
+  if(!navigator.storage||!navigator.storage.persist)return null;
+  try{
+    if(await navigator.storage.persisted())return true;
+    return await navigator.storage.persist();
+  }catch(e){return null;}
+}
+
+/* ══════════════════ 2. CATEGORIES + AUTO-CATEGORISER ══════════════════ */
+const SEED_CATS=[
+  ['food','Food & Dining','#C4703C'],   ['groc','Groceries','#7FD1AE'],
+  ['fuel','Fuel','#F5B942'],            ['trans','Transport','#6FA8DC'],
+  ['bills','Bills & Recharge','#C58AF9'],['rent','Rent','#E5484D'],
+  ['util','Utilities','#5EC7C7'],        ['health','Health','#F58CA8'],
+  ['shop','Shopping','#9BE07A'],         ['subs','Subscriptions','#8A7BF0'],
+  ['travel','Travel','#4FD1C5'],         ['ent','Entertainment','#FF9EC4'],
+  ['edu','Education','#B0A0FF'],         ['care','Personal Care','#FFCB6B'],
+  ['gift','Gifts & Donations','#FF8A5B'],['biz','Business','#A0AEC0'],
+  ['misc','Misc','#6B7280']
+];
+/* Seed keywords — India-first. These are the cold-start priors; the learned
+   rules below override them the moment you correct a guess. */
+const SEED_KW={
+  food:'swiggy zomato restaurant lunch dinner breakfast cafe coffee tea snack hotel dhaba pizza burger biryani meal canteen chai bakery mess',
+  groc:'grocery groceries bigbasket dmart kirana vegetables veggies sabzi milk dairy blinkit zepto instamart supermarket atta rice dal provision',
+  fuel:'petrol diesel fuel hp indianoil bharat pump cng gas',
+  trans:'ola uber auto rapido taxi cab bus metro train ticket toll parking rickshaw fastag irctc',
+  bills:'recharge jio airtel vi bsnl mobile broadband wifi postpaid prepaid dth internet',
+  rent:'rent lease maintenance society landlord deposit',
+  util:'electricity power bill water gas cylinder lpg indane sewage municipal tax',
+  health:'medicine pharmacy apollo doctor hospital clinic medical lab test consult dental checkup pharmeasy tablets',
+  shop:'amazon flipkart myntra clothes shirt shoes shopping mall meesho ajio electronics gadget',
+  subs:'netflix spotify prime hotstar subscription youtube membership saas domain hosting adobe icloud openai claude',
+  travel:'flight hotel booking oyo airbnb trip tour luggage indigo vistara makemytrip goibibo',
+  ent:'movie cinema pvr inox game concert event bookmyshow outing',
+  edu:'course book fees tuition exam college udemy coursera stationery notebook',
+  care:'salon haircut barber gym spa cosmetics grooming laundry',
+  gift:'gift donation charity temple wedding return chanda',
+  biz:'client office print visiting card courier sample vendor stationery supplier freight transport gst'
+};
+const STOP=new Set('for the and with from that this was are you our not but all any per via got had has have out off into onto near then than some more less had rs inr amount paid pay bought buy get one two'.split(' '));
+let CATS=[],CATMAP={};
+function tokenize(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').split(/\s+/)
+    .filter(t=>t.length>=3&&!STOP.has(t)&&!/^\d+$/.test(t));
+}
+let KWIDX=null;
+function kwIndex(){
+  if(KWIDX)return KWIDX;KWIDX={};
+  for(const c in SEED_KW)for(const w of SEED_KW[c].split(' '))if(w)KWIDX[w]=c;
+  return KWIDX;
+}
+let RULES=new Map();
+/* Guess = learned rules first (weighted by how often you confirmed them),
+   seed keywords second. Returns null when it has no idea. */
+function guessCategory(desc){
+  const toks=tokenize(desc);if(!toks.length)return null;
+  const score={};
+  for(const t of toks){
+    const r=RULES.get(t);
+    if(r)for(const c in r.counts)score[c]=(score[c]||0)+r.counts[c]*3;
+  }
+  const idx=kwIndex();
+  for(const t of toks){
+    if(idx[t])score[idx[t]]=(score[idx[t]]||0)+2;
+    else for(const w in idx){if(w.length>4&&t.includes(w)){score[idx[w]]=(score[idx[w]]||0)+1;break;}}
+  }
+  let best=null,bv=0;
+  for(const c in score)if(score[c]>bv){bv=score[c];best=c;}
+  return best&&CATMAP[best]?{cat:best,score:bv}:null;
+}
+async function learn(desc,catId){
+  const toks=[...new Set(tokenize(desc))];if(!toks.length)return;
+  const rows=toks.map(t=>{
+    const r=RULES.get(t)||{token:t,counts:{}};
+    r.counts[catId]=(r.counts[catId]||0)+1;RULES.set(t,r);return r;
+  });
+  await DB.put('rules',rows);
+}
+
+/* ── Natural-language quick entry ──────────────────────────────
+   Habit research (BJ Fogg, via budgeting-app retention studies) is blunt:
+   an action needing more than about two steps to initiate doesn't stick.
+   Four fields per expense is where these apps die. So: one text box.
+   "swiggy dinner 480", "480 petrol", "yesterday 2000 rent" all parse.       */
+const REL_DATE=[
+  [/\byesterday\b|\byday\b|\bkal\b/i,-1],[/\btoday\b/i,0],
+  [/\bday before\b|\bdbf\b/i,-2],[/\b2 days ago\b/i,-2],[/\b3 days ago\b/i,-3]
+];
+function parseEntry(text){
+  let s=' '+String(text||'')+' ',date=null;
+  for(const [re,off] of REL_DATE)if(re.test(s)){date=addDays(today(),off);s=s.replace(re,' ');break;}
+  // "12 aug" / "3rd" style day references
+  const dm=s.match(/\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b/i);
+  if(dm){const y=new Date().getFullYear(),mo=MON.findIndex(m=>m.toLowerCase()===dm[2].toLowerCase());
+    let c=y+'-'+pad2(mo+1)+'-'+pad2(+dm[1]);
+    if(c>today())c=(y-1)+'-'+pad2(mo+1)+'-'+pad2(+dm[1]);
+    if(/^\d{4}-\d{2}-\d{2}$/.test(c)){date=c;s=s.replace(dm[0],' ');}}
+  // amount: prefer a ₹/rs-tagged number, else the last standalone number
+  let amount=null,mAmt=s.match(/(?:₹|\brs\.?\s*)\s*(\d+(?:[.,]\d+)?)\s*(k)?\b/i);
+  if(!mAmt){const all=[...s.matchAll(/(?<![\w.])(\d+(?:\.\d{1,2})?)\s*(k)?(?![\w])/gi)];
+    if(all.length)mAmt=all[all.length-1];}
+  if(mAmt){amount=parseFloat(String(mAmt[1]).replace(',','.'));
+    if(mAmt[2])amount*=1000;
+    s=s.replace(mAmt[0],' ');}
+  const desc=s.replace(/[₹]|\brs\.?\b/gi,' ').replace(/\s+/g,' ').trim();
+  const g=guessCategory(desc);
+  return{amount,desc,date:date||today(),cat:g?g.cat:null,dateExplicit:!!date};
+}
+/* One-tap repeat: your genuinely repeated purchases, most recent first. */
+function frequents(limit=6){
+  const seen={};
+  for(const e of live()){
+    const k=(e.description||'').toLowerCase().trim();
+    if(k.length<3)continue;
+    (seen[k]??={n:0,last:'',amt:e.amount,cat:e.category_id,label:e.description}).n++;
+    if(e.spent_on>seen[k].last){seen[k].last=e.spent_on;seen[k].amt=e.amount;seen[k].cat=e.category_id;}
+  }
+  return Object.values(seen).filter(x=>x.n>=2).sort((a,b)=>b.last<a.last?-1:1).slice(0,limit);
+}
+
+/* ══════════════════ 3. ANALYTICS ══════════════════ */
+let EXP=[];                                    // live cache, non-deleted, date-desc
+const live=()=>EXP.filter(e=>!e.deleted_at);
+function byMonth(){
+  const m={};for(const e of live()){(m[monKey(e.spent_on)]??=[]).push(e);}return m;
+}
+function sum(a){return a.reduce((s,e)=>s+e.amount,0);}
+function monthStats(key){
+  const rows=live().filter(e=>monKey(e.spent_on)===key);
+  const total=sum(rows);
+  const [y,m]=key.split('-').map(Number);
+  const dim=new Date(y,m,0).getDate();
+  const isCur=key===monKey(today());
+  const elapsed=isCur?new Date().getDate():dim;
+  const byCat={};for(const e of rows)byCat[e.category_id]=(byCat[e.category_id]||0)+e.amount;
+  const daily=Array(dim).fill(0);for(const e of rows)daily[parseD(e.spent_on).getDate()-1]+=e.amount;
+  return{key,rows,total,count:rows.length,dim,elapsed,isCur,byCat,daily,
+    perDay:elapsed?total/elapsed:0, projected:isCur&&elapsed?total/elapsed*dim:total};
+}
+function last12(){
+  const out=[],d=new Date();d.setDate(1);
+  for(let i=11;i>=0;i--){const t=new Date(d.getFullYear(),d.getMonth()-i,1);
+    const k=t.getFullYear()+'-'+pad2(t.getMonth()+1);
+    out.push({key:k,total:sum(live().filter(e=>monKey(e.spent_on)===k))});}
+  return out;
+}
+function dowPattern(){
+  const s=Array(7).fill(0),c=Array(7).fill(0),seen={};
+  for(const e of live()){const d=parseD(e.spent_on).getDay();s[d]+=e.amount;
+    if(!seen[e.spent_on]){seen[e.spent_on]=1;c[d]++;}}
+  return s.map((v,i)=>c[i]?v/c[i]:0);
+}
+
+/* Recurring / subscription detection.
+   Group by description signature → require >=3 hits, a stable gap and a
+   stable amount. Reports cadence, next expected date and overdue flag. */
+const CADENCE=[[7,'Weekly',2],[14,'Fortnightly',3],[30,'Monthly',6],[91,'Quarterly',12],[182,'Half-yearly',20],[365,'Yearly',35]];
+function signature(e){
+  const t=tokenize(e.description);
+  if(!t.length)return 'cat:'+e.category_id;
+  return t.slice(0,2).sort().join(' ');
+}
+function detectRecurring(){
+  const cutoff=addDays(today(),-420);
+  const groups={};
+  for(const e of live()){if(e.spent_on<cutoff)continue;(groups[signature(e)]??=[]).push(e);}
+  const out=[];
+  for(const sig in groups){
+    const g=groups[sig].slice().sort((a,b)=>a.spent_on<b.spent_on?-1:1);
+    if(g.length<3)continue;
+    const gaps=[];for(let i=1;i<g.length;i++)gaps.push(daysBetween(g[i-1].spent_on,g[i].spent_on));
+    if(gaps.some(x=>x===0))continue;
+    const sorted=gaps.slice().sort((a,b)=>a-b);
+    const med=sorted[Math.floor(sorted.length/2)];
+    const hit=CADENCE.find(([d,,tol])=>Math.abs(med-d)<=tol);
+    if(!hit)continue;
+    const [ideal,name,tol]=hit;
+    const okGaps=gaps.filter(x=>Math.abs(x-med)<=Math.max(tol,med*.35)).length;
+    if(okGaps/gaps.length<0.6)continue;
+    const amts=g.map(e=>e.amount),mean=amts.reduce((a,b)=>a+b,0)/amts.length;
+    const sd=Math.sqrt(amts.reduce((s,a)=>s+(a-mean)**2,0)/amts.length);
+    const cv=mean?sd/mean:1;
+    if(cv>0.45)continue;
+    const last=g[g.length-1].spent_on, next=addDays(last,med);
+    const overdue=daysBetween(next,today())>Math.max(3,med*.15);
+    out.push({
+      sig, label:g[g.length-1].description||CATMAP[g[0].category_id].name,
+      cat:g[g.length-1].category_id, n:g.length, cadence:name, gap:med,
+      mean, min:Math.min(...amts), max:Math.max(...amts), stable:cv<0.08,
+      last, next, overdue, monthly:mean*(30/med),
+      confidence:Math.min(99,Math.round((okGaps/gaps.length)*(1-cv)*100*Math.min(1,g.length/5)+8))
+    });
+  }
+  return out.sort((a,b)=>b.monthly-a.monthly);
+}
+
+/* ══════════════════ 3b. DEEP ANALYTICS ══════════════════ */
+
+/* Robust descriptive stats. Spending is strongly right-skewed — a few big
+   days drag the mean far above what a normal day looks like — so the median
+   and the median absolute deviation are the honest summary, with the mean
+   shown alongside so the gap between them is visible. */
+function quantile(sorted,q){
+  if(!sorted.length)return 0;
+  const p=(sorted.length-1)*q,lo=Math.floor(p),hi=Math.ceil(p);
+  return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(p-lo);
+}
+function robust(values){
+  const v=values.slice().sort((a,b)=>a-b),n=v.length;
+  if(!n)return{n:0,median:0,mean:0,mad:0,q1:0,q3:0,min:0,max:0};
+  const median=quantile(v,.5);
+  const dev=v.map(x=>Math.abs(x-median)).sort((a,b)=>a-b);
+  return{n,median,mean:v.reduce((a,b)=>a+b,0)/n,
+    mad:quantile(dev,.5), q1:quantile(v,.25),q3:quantile(v,.75),
+    min:v[0],max:v[n-1]};
+}
+
+/* Daily totals for the last n days, oldest first. Zero-filled: days with no
+   spending are real data, not gaps, and dropping them inflates every average. */
+function dailySeries(n){
+  const out=[],idx={};
+  for(const e of live())idx[e.spent_on]=(idx[e.spent_on]||0)+e.amount;
+  for(let i=n-1;i>=0;i--){const d=addDays(today(),-i);out.push({d,v:idx[d]||0});}
+  return out;
+}
+function rollingMean(arr,w){
+  return arr.map((_,i)=>{
+    const from=Math.max(0,i-w+1),slice=arr.slice(from,i+1);
+    return slice.reduce((a,b)=>a+b,0)/slice.length;
+  });
+}
+
+/* Fixed vs variable. The recurring detector already identifies your committed
+   payments; everything else is what you actually decide week to week. Standard
+   personal-finance framing: fixed costs set the floor, variable is your room. */
+function fixedVsVariable(key){
+  const rec=detectRecurring();
+  const sigs=new Set(rec.map(r=>r.sig));
+  const rows=live().filter(e=>monKey(e.spent_on)===key);
+  let fixed=0,variable=0;
+  for(const e of rows)(sigs.has(signature(e))?fixed+=e.amount:variable+=e.amount);
+  return{fixed,variable,total:fixed+variable,
+    pct:fixed+variable?fixed/(fixed+variable)*100:0,baseline:rec.reduce((s,r)=>s+r.monthly,0)};
+}
+
+/* Variance bridge: which categories actually caused this month to differ from
+   last month. Ordered by absolute impact, minor drivers folded into "Other",
+   per standard waterfall practice — a bridge with 17 tiny bars explains nothing. */
+function bridge(curKey,prevKey){
+  const a=monthStats(prevKey),b=monthStats(curKey);
+  const ids=new Set([...Object.keys(a.byCat),...Object.keys(b.byCat)]);
+  let d=[...ids].map(id=>({id,name:CATMAP[id]?CATMAP[id].name:id,
+    delta:(b.byCat[id]||0)-(a.byCat[id]||0)})).filter(x=>Math.abs(x.delta)>=1);
+  d.sort((x,y)=>Math.abs(y.delta)-Math.abs(x.delta));
+  const top=d.slice(0,5),rest=d.slice(5);
+  if(rest.length){const o=rest.reduce((s,x)=>s+x.delta,0);
+    if(Math.abs(o)>=1)top.push({id:null,name:'Other ('+rest.length+')',delta:o});}
+  return{from:a.total,to:b.total,steps:top,net:b.total-a.total,curKey,prevKey};
+}
+
+/* Unusual transactions. Leys et al. (2013) recommend median ± 2.5·MAD over
+   mean ± SD, because the mean and SD are themselves distorted by the very
+   outliers you're hunting. Compared within category — a big rent payment is
+   not unusual, a big coffee is. */
+function unusual(key){
+  const rows=live().filter(e=>monKey(e.spent_on)===key);
+  const hist={};
+  for(const e of live())(hist[e.category_id]??=[]).push(e.amount);
+  const allAmts=live().map(e=>e.amount);
+  const global_=robust(allAmts);
+  const out=[];
+  for(const e of rows){
+    const h=hist[e.category_id];
+    // A category with almost no history has no norm to deviate from, so compare
+    // against all spending instead — a one-off ₹28,000 flight is still unusual
+    // even though it's the only flight.
+    const useCat=h&&h.length>=5;
+    const r=useCat?robust(h):global_;
+    const scale=r.mad||r.median*0.25;
+    if(!scale||r.n<5)continue;
+    const z=(e.amount-r.median)/scale;
+    if(z>=2.5)out.push({e,z,typical:r.median,scope:useCat?CATMAP[e.category_id].name:'all spending',
+      mult:r.median?e.amount/r.median:0});
+  }
+  return out.sort((a,b)=>b.z-a.z).slice(0,5);
+}
+
+/* Concentration. The 80/20 rule is usually quoted, rarely true — Byron Sharp's
+   work puts the real ratio nearer 50/20 in consumer data. So measure it rather
+   than assume it: report the actual share your biggest transactions carry. */
+function concentration(key){
+  const amts=live().filter(e=>monKey(e.spent_on)===key).map(e=>e.amount).sort((a,b)=>b-a);
+  const total=amts.reduce((a,b)=>a+b,0);
+  if(!total)return null;
+  let run=0;const curve=amts.map(a=>{run+=a;return run/total;});
+  const shareAt=p=>{const i=Math.max(0,Math.ceil(amts.length*p)-1);return curve[i]||0;};
+  const txnsFor=s=>{const i=curve.findIndex(c=>c>=s);return i<0?amts.length:i+1;};
+  return{n:amts.length,total,curve,
+    top10:shareAt(.10),top20:shareAt(.20),
+    txnsForHalf:txnsFor(.5), pctForHalf:txnsFor(.5)/amts.length*100};
+}
+
+/* Per-category monthly series for small multiples. Tufte's argument for the
+   form: constant axes, many panels, so differences pop out at a glance. */
+function categorySparks(nMonths=6){
+  const keys=[];const d=new Date();d.setDate(1);
+  for(let i=nMonths-1;i>=0;i--){const t=new Date(d.getFullYear(),d.getMonth()-i,1);
+    keys.push(t.getFullYear()+'-'+pad2(t.getMonth()+1));}
+  const byCat={};
+  for(const e of live()){
+    const k=monKey(e.spent_on);if(!keys.includes(k))continue;
+    (byCat[e.category_id]??=Object.fromEntries(keys.map(k=>[k,0])))[k]+=e.amount;
+  }
+  return Object.entries(byCat).map(([id,m])=>{
+    const series=keys.map(k=>m[k]);
+    const recent=series[series.length-1],prior=series.slice(0,-1).filter(x=>x>0);
+    const base=prior.length?prior.reduce((a,b)=>a+b,0)/prior.length:0;
+    return{id,name:CATMAP[id].name,color:CATMAP[id].color,series,keys,
+      recent,base,drift:base?(recent-base)/base*100:null};
+  }).sort((a,b)=>b.recent-a.recent).slice(0,6);
+}
+
+/* Transaction-size distribution: does the month go on a few big hits, or a
+   thousand cuts? Log-ish buckets, because the sizes span three orders. */
+function sizeBuckets(key){
+  const B=[[0,100],[100,300],[300,600],[600,1200],[1200,3000],[3000,Infinity]];
+  const L=['<100','100-300','300-600','600-1.2k','1.2-3k','3k+'];
+  const cnt=B.map(()=>0),val=B.map(()=>0);
+  for(const e of live().filter(e=>monKey(e.spent_on)===key)){
+    const i=B.findIndex(([lo,hi])=>e.amount>=lo&&e.amount<hi);
+    if(i>=0){cnt[i]++;val[i]+=e.amount;}
+  }
+  return{labels:L,cnt,val};
+}
+
+/* Data quality. Every number above assumes you logged everything. Days with no
+   entry at all are the honest caveat — say so rather than quietly understating. */
+function loggingGaps(key){
+  const st=monthStats(key);
+  const upto=st.isCur?new Date().getDate():st.dim;
+  let blank=0;for(let i=0;i<upto;i++)if(st.daily[i]===0)blank++;
+  return{blank,upto,pct:upto?blank/upto*100:0};
+}
+
+/* ══════════════════ 4b. DEEP CHART RENDERERS ══════════════════ */
+
+function heatmapSVG(key){
+  const st=monthStats(key);
+  const [y,m]=key.split('-').map(Number);
+  const first=new Date(y,m-1,1).getDay();
+  const cells=first+st.dim, rows=Math.ceil(cells/7);
+  const C=44,R=30,W=7*C,H=rows*R;
+  const max=Math.max(...st.daily,1);
+  const todayD=key===monKey(today())?new Date().getDate():-1;
+  let s=`<svg viewBox="0 0 ${W} ${H+20}" width="100%" style="display:block" role="img"
+    aria-label="Daily spending heatmap for ${monLabel(key)}">`;
+  DOW.forEach((d,i)=>s+=`<text class="axis" x="${i*C+C/2}" y="11" text-anchor="middle">${d[0]}</text>`);
+  for(let i=0;i<st.dim;i++){
+    const idx=first+i,cx=(idx%7)*C,cy=Math.floor(idx/7)*R+20;
+    const v=st.daily[i],t=v/max;
+    const fill=v===0?'#1B1E25':`rgba(255,122,61,${(0.18+t*0.82).toFixed(2)})`;
+    s+=`<rect x="${cx+2}" y="${cy}" width="${C-4}" height="${R-4}" rx="4" fill="${fill}"
+        ${i+1===todayD?'stroke="#EAE7E1" stroke-width="1.5"':''}/>`;
+    s+=`<text x="${cx+C/2}" y="${cy+(R-4)/2+3.5}" text-anchor="middle"
+        font-size="10" font-family="var(--mono)" font-weight="600"
+        fill="${t>0.55?'#140A05':(v===0?'#5A606C':'#EAE7E1')}">${i+1}</text>`;
+  }
+  return s+'</svg>';
+}
+
+function waterfallSVG(b){
+  const steps=b.steps;
+  const W=340,H=150,n=steps.length+2,gap=5,bw=(W-gap*(n-1))/n;
+  const vals=[b.from,b.to];let run=b.from;
+  for(const s of steps){vals.push(run,run+s.delta);run+=s.delta;}
+  const lo=Math.min(0,...vals),hi=Math.max(...vals,1);
+  const Y=v=>H-((v-lo)/(hi-lo))*H;
+  let s=`<svg viewBox="0 0 ${W} ${H+38}" width="100%" style="display:block" role="img">`;
+  s+=`<line class="grid" x1="0" y1="${Y(0)}" x2="${W}" y2="${Y(0)}" opacity=".7"/>`;
+  const bar=(i,y0,y1,fill)=>{
+    const x=i*(bw+gap),t=Math.min(y0,y1),h=Math.max(2,Math.abs(y1-y0));
+    return `<rect x="${x.toFixed(1)}" y="${t.toFixed(1)}" width="${bw.toFixed(1)}"
+      height="${h.toFixed(1)}" rx="2" fill="${fill}"/>`;
+  };
+  const lab=(i,txt,y,fill,wt)=>`<text class="axis" x="${(i*(bw+gap)+bw/2).toFixed(1)}" y="${y}"
+    text-anchor="middle" ${fill?`fill="${fill}"`:''} ${wt?'font-weight="600"':''}>${txt}</text>`;
+  s+=bar(0,Y(b.from),Y(0),'#4A5160')+lab(0,money(b.from),Y(b.from)-5,'#A3AAB8',1);
+  run=b.from;
+  steps.forEach((st,k)=>{
+    const i=k+1,up=st.delta>0;
+    s+=bar(i,Y(run),Y(run+st.delta),up?'#FF6B6E':'#6ECFA6');
+    const yTop=Math.min(Y(run),Y(run+st.delta));
+    s+=lab(i,(up?'+':'−')+money(Math.abs(st.delta)),yTop-5,up?'#FF6B6E':'#6ECFA6',1);
+    run+=st.delta;
+  });
+  s+=bar(n-1,Y(b.to),Y(0),'#4A5160')+lab(n-1,money(b.to),Y(b.to)-5,'#A3AAB8',1);
+  const names=[monLabel(b.prevKey||'').split(' ')[0]||'Prev',...steps.map(x=>x.name.split(' ')[0].slice(0,7)),
+               monLabel(b.curKey||'').split(' ')[0]||'Now'];
+  names.forEach((nm,i)=>{s+=lab(i,esc(nm),H+16);});
+  return s+'</svg>';
+}
+
+function sparkSVG(data,color){
+  const W=104,H=30,max=Math.max(...data,1);
+  if(data.length<2)return '';
+  const pts=data.map((v,i)=>[i/(data.length-1)*W,H-2-(v/max)*(H-6)]);
+  const path=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const last=pts[pts.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;overflow:visible">
+    <path d="${path} L ${W} ${H} L 0 ${H} Z" fill="${color}" opacity=".13"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.4" fill="${color}"/></svg>`;
+}
+
+function paretoSVG(curve){
+  const W=340,H=120,n=curve.length;
+  if(n<2)return '';
+  const pts=curve.map((c,i)=>[((i+1)/n)*W,H-c*H]);
+  let s=`<svg viewBox="0 0 ${W} ${H+18}" width="100%" style="display:block" role="img">`;
+  s+=`<line x1="0" y1="${H}" x2="${W}" y2="0" stroke="#3A404C" stroke-width="1" stroke-dasharray="3 3"/>`;
+  for(const q of [.5,.8]){
+    const y=H-q*H;
+    s+=`<line class="grid" x1="0" y1="${y}" x2="${W}" y2="${y}" opacity=".6"/>
+        <text class="axis" x="2" y="${y-4}">${q*100}% of spend</text>`;
+  }
+  s+=`<path d="${pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')} L ${W} ${H} L 0 ${H} Z"
+      fill="#FF7A3D" opacity=".12"/>`;
+  s+=`<path d="${pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')}"
+      fill="none" stroke="#FF7A3D" stroke-width="2" stroke-linejoin="round"/>`;
+  s+=`<text class="axis" x="0" y="${H+14}">biggest</text>
+      <text class="axis" x="${W}" y="${H+14}" text-anchor="end">smallest</text>`;
+  return s+'</svg>';
+}
+
+function histSVG(h){
+  const W=340,H=86,n=h.cnt.length,gap=6,bw=(W-gap*(n-1))/n;
+  const max=Math.max(...h.val,1);
+  let s=`<svg viewBox="0 0 ${W} ${H+30}" width="100%" style="display:block" role="img">`;
+  h.val.forEach((v,i)=>{
+    const ht=Math.max(v>0?2:0,v/max*H),x=i*(bw+gap);
+    s+=`<rect x="${x.toFixed(1)}" y="${(H-ht).toFixed(1)}" width="${bw.toFixed(1)}"
+        height="${ht.toFixed(1)}" rx="2" fill="#FF7A3D" opacity="${v?0.85:0.2}"/>`;
+    s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+13}" text-anchor="middle">${h.labels[i]}</text>`;
+    if(h.cnt[i])s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+25}" text-anchor="middle"
+        fill="#858C9A">${h.cnt[i]}×</text>`;
+  });
+  return s+'</svg>';
+}
+
+/* ══════════════════ 4. CHARTS (hand-rolled SVG, zero deps) ══════════════════ */
+/* Mobile dataviz guidance is consistent: 3-4 colours, not a rainbow; make the
+   value readable without hover, since there is no hover on a phone. So bars are
+   one hue at two intensities, and the selected bar prints its own value. */
+function barChart(data,labels,hi,tapAttr){
+  const W=340,H=104,n=data.length,gap=4,bw=(W-gap*(n-1))/n;
+  const max=Math.max(...data,1);
+  let s=`<svg viewBox="0 0 ${W} ${H+34}" width="100%" style="display:block" role="img">`;
+  data.forEach((v,i)=>{
+    const h=Math.max(v>0?2:0,v/max*H),x=i*(bw+gap),y=H-h,on=i===hi;
+    if(tapAttr)s+=`<rect x="${x.toFixed(1)}" y="0" width="${bw.toFixed(1)}" height="${H+18}"
+      fill="transparent" style="cursor:pointer" ${tapAttr}="${i}"/>`;
+    s+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="2"
+         fill="${on?'#FF7A3D':'#333A46'}" pointer-events="none"/>`;
+    if(on&&v>0)s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${Math.max(9,y-6).toFixed(1)}"
+         text-anchor="middle" fill="#FF9A66" font-weight="600" pointer-events="none">${money(v)}</text>`;
+    if(i%2===0||on)s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+16}" text-anchor="middle"
+         ${on?'fill="#FF7A3D"':''} pointer-events="none">${labels[i]}</text>`;
+  });
+  return s+'</svg>';
+}
+function lineChart(series){ // [{data,color,dash}]
+  const W=340,H=130,P=4;
+  const max=Math.max(1,...series.flatMap(s=>s.data));
+  const len=Math.max(...series.map(s=>s.data.length));
+  let s=`<svg viewBox="0 0 ${W} ${H+6}" width="100%" style="display:block">`;
+  for(let i=0;i<=3;i++){const y=P+(H-P*2)*i/3;s+=`<line class="grid" x1="0" y1="${y}" x2="${W}" y2="${y}" opacity=".6"/>`;}
+  series.forEach(ser=>{
+    const d=ser.data;if(!d.length)return;
+    const pts=d.map((v,i)=>[(i/(Math.max(1,len-1)))*W,P+(H-P*2)*(1-v/max)]);
+    const path=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+    if(ser.fill)s+=`<path d="${path} L ${pts[pts.length-1][0].toFixed(1)} ${H-P} L 0 ${H-P} Z" fill="${ser.color}" opacity=".10"/>`;
+    s+=`<path d="${path}" fill="none" stroke="${ser.color}" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round" ${ser.dash?'stroke-dasharray="4 4" opacity=".75"':''}/>`;
+  });
+  return s+'</svg>';
+}
+
+/* ══════════════════ 5. APP STATE ══════════════════ */
+const S={
+  view:'add', mode:'quick', quick:'', amount:'', desc:'', date:today(),
+  cat:null, catManual:false, dateManual:false,
+  logMonth:monKey(today()), insMonth:monKey(today()), q:'', detail:false, persisted:null
+};
+
+/* ══════════════════ 6. VIEWS ══════════════════ */
+function addState(){                       // single source of truth for what will be saved
+  if(S.mode==='quick'){
+    const p=parseEntry(S.quick);
+    return{amount:p.amount,desc:p.desc,
+      date:S.dateManual?S.date:p.date,
+      cat:S.catManual?S.cat:p.cat, auto:!S.catManual&&!!p.cat};
+  }
+  const g=S.catManual?null:guessCategory(S.desc);
+  return{amount:parseFloat(S.amount)||null,desc:S.desc.trim(),date:S.date,
+    cat:S.catManual?S.cat:(g?g.cat:null), auto:!S.catManual&&!!g};
+}
+function previewHTML(){
+  const a=addState(),c=a.cat?CATMAP[a.cat]:null,ok=a.amount>0;
+  return `<div class="amt num ${ok?'':'zero'}"><span class="cur">₹</span>${esc(fmtAmt(ok?String(a.amount):''))}</div>
+  <div class="gu">
+    <button class="chip ${c?'on':''}" id="catbtn" aria-label="Category: ${c?esc(c.name):'not set'}">
+      ${c?`<i class="dot" style="background:${c.color}"></i>${esc(c.name)}`:'Pick category'}
+      ${a.auto?'<span class="tag">AUTO</span>':''}</button>
+    <button class="chip ${a.date!==today()?'on':''}" id="datebtn">${a.date===today()?'Today':dayLabel(a.date)}</button>
+  </div>`;
+}
+function saveLabel(){const a=addState();
+  return a.amount>0?'Save  ·  ₹'+fmtAmt(String(a.amount)):'Enter an amount';}
+
+function vAdd(){
+  const t=today(), tRows=live().filter(e=>e.spent_on===t), fq=frequents();
+  return `
+  <div class="hd">
+    <h1>Add expense</h1>
+    <div class="sub lbl">Today · ₹${money(sum(tRows))} across ${tRows.length} ${tRows.length===1?'entry':'entries'}</div>
+  </div>
+  ${DB.mem?`<div class="banner warn" role="status"><b>Preview mode.</b> Storage is unavailable here, so entries vanish on reload. Deploy to HTTPS and install to your home screen for real persistence.</div>`:''}
+  ${S.backupNudge?`<div class="banner" role="status">No backup in ${S.backupNudge} days. Export from <b>More</b>.</div>`:''}
+
+  ${fq.length?`<div style="padding:14px 0 2px">
+    <div class="lbl pad" style="margin-bottom:8px">Log again</div>
+    <div class="scrollx">${fq.map((f,i)=>`<button class="chip" data-fq="${i}">
+      <i class="dot" style="background:${CATMAP[f.cat].color}"></i>${esc(f.label)}
+      <span class="num dimc" style="font-weight:600">₹${money(f.amt)}</span></button>`).join('')}</div>
+  </div>`:''}
+
+  <div class="amtwrap" id="preview" aria-live="polite">${previewHTML()}</div>
+
+  <div class="seg" role="tablist" style="margin:6px 0 10px">
+    <button role="tab" aria-selected="${S.mode==='quick'}" class="${S.mode==='quick'?'on':''}" data-mode="quick">Type it</button>
+    <button role="tab" aria-selected="${S.mode==='pad'}" class="${S.mode==='pad'?'on':''}" data-mode="pad">Keypad</button>
+  </div>
+
+  ${S.mode==='quick'?`
+    <div class="pad">
+      <label class="lbl" for="quick">Amount and what it was</label>
+      <input id="quick" class="quickin" value="${esc(S.quick)}" autocomplete="off"
+             enterkeyhint="done" maxlength="120" placeholder="swiggy dinner 480">
+      <div class="hint">Type it however you'd say it. <b>“yesterday 2000 rent”</b>, <b>“1.2k ola airport”</b>, <b>“₹250 medicine”</b> all work — amount, category and date are read out of the text.</div>
+    </div>`
+  :`
+    <div class="pad">
+      <label class="lbl" for="desc">What was it for</label>
+      <input id="desc" class="quickin" placeholder="petrol for the car" value="${esc(S.desc)}"
+             autocomplete="off" enterkeyhint="done" maxlength="90">
+    </div>
+    <div class="keypad">
+      ${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="key" data-k="${n}" aria-label="${n}">${n}</button>`).join('')}
+      <button class="key" data-k="." aria-label="decimal point">.</button>
+      <button class="key" data-k="0" aria-label="0">0</button>
+      <button class="key" data-k="del" aria-label="delete last digit">⌫</button>
+    </div>`}
+
+  <button class="save" id="save" ${addState().amount>0?'':'disabled'}>${saveLabel()}</button>
+
+  ${tRows.length?`<div class="recent"><div class="lbl" style="margin-bottom:6px">Entered today</div>
+    ${tRows.slice(0,6).map(e=>`<button class="rrow" data-edit="${e.id}">
+      <i class="dot" style="background:${CATMAP[e.category_id].color}"></i>
+      <span class="rd">${esc(e.description||CATMAP[e.category_id].name)}</span>
+      <span class="num" style="font-weight:600">₹${money2(e.amount)}</span></button>`).join('')}</div>`:''}
+  `;
+}
+function fmtAmt(a){
+  if(!a||a==='.')return '0';
+  const [i,d]=a.split('.');
+  const ii=(+i||0).toLocaleString('en-IN');
+  return d===undefined?ii:ii+'.'+d;
+}
+
+function vLog(){
+  const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
+  if(!months.includes(S.logMonth))S.logMonth=months[0]||monKey(today());
+  let rows=live().filter(e=>monKey(e.spent_on)===S.logMonth);
+  if(S.q){const q=S.q.toLowerCase();
+    rows=rows.filter(e=>(e.description||'').toLowerCase().includes(q)||CATMAP[e.category_id].name.toLowerCase().includes(q));}
+  rows.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
+  const days={};for(const e of rows)(days[e.spent_on]??=[]).push(e);
+  return `
+  <div class="hd">
+    <h1>Log</h1>
+    <div class="sub lbl">${rows.length} entries · ₹${money(sum(rows))}</div>
+  </div>
+  <div style="padding:12px 0 4px">
+    <div class="scrollx">${months.map(m=>`<button class="chip ${m===S.logMonth?'on':''}" data-mon="${m}">${monLabel(m)}</button>`).join('')||'<span class="dimc" style="font-size:13px">No data yet</span>'}</div>
+  </div>
+  <div class="pad" style="margin-top:8px">
+    <div class="frow" style="border-bottom-color:var(--line)">
+      <span class="lbl">Find</span>
+      <input id="q" placeholder="search description or category" value="${esc(S.q)}" autocomplete="off">
+    </div>
+  </div>
+  <div id="loglist">${logList()}</div>
+  <div style="height:24px"></div>`;
+}
+function logList(){
+  let rows=live().filter(e=>monKey(e.spent_on)===S.logMonth);
+  if(S.q){const q=S.q.toLowerCase();
+    rows=rows.filter(e=>(e.description||'').toLowerCase().includes(q)||CATMAP[e.category_id].name.toLowerCase().includes(q));}
+  rows.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
+  const days={};for(const e of rows)(days[e.spent_on]??=[]).push(e);
+  if(!Object.keys(days).length)return '<div class="empty">Nothing here.<br>Add an expense or pick another month.</div>';
+  return Object.keys(days).sort().reverse().map(d=>`
+    <div class="daygrp">
+      <div class="dayhd"><span class="lbl">${dayLabel(d)}</span>
+        <span class="num dimc" style="font-size:12.5px">₹${money(sum(days[d]))}</span></div>
+      ${days[d].map(e=>`<div class="erow" data-edit="${e.id}">
+        <i class="dot" style="background:${CATMAP[e.category_id].color};width:10px;height:26px;border-radius:3px"></i>
+        <div class="body"><div class="t">${esc(e.description||CATMAP[e.category_id].name)}</div>
+          <div class="m">${esc(CATMAP[e.category_id].name)}</div></div>
+        <div class="v">₹${money2(e.amount)}</div></div>`).join('')}
+    </div>`).join('');
+}
+
+function vInsights(){
+  const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
+  if(!live().length)return `<div class="hd"><h1>Trends</h1></div>
+    <div class="empty">Add a week of expenses and this page fills up:<br>month-on-month deltas, category shifts, burn rate.</div>`;
+  if(!months.includes(S.insMonth))S.insMonth=months[0];
+  const cur=monthStats(S.insMonth);
+  const spentDays=cur.daily.slice(0,cur.elapsed).filter(v=>v>0);
+  const rday=robust(spentDays);
+  const pi=months.indexOf(S.insMonth);
+  const prevKey=months[pi+1];
+  const prev=prevKey?monthStats(prevKey):null;
+  const l12=last12();
+  const hiIdx=l12.findIndex(m=>m.key===S.insMonth);
+  const delta=(a,b)=>b?((a-b)/b*100):null;
+  const dTot=prev?delta(cur.total,prev.total):null;
+  const arrow=v=>v>0?'▲':'▼';
+  const dcls=v=>v>0?'bad':'good';
+
+  // category breakdown w/ prior-month delta
+  const cats=Object.entries(cur.byCat).sort((a,b)=>b[1]-a[1]);
+  const maxCat=cats.length?cats[0][1]:1;
+
+  // cumulative burn: this month vs previous
+  const d90=dailySeries(90).map(x=>x.v);
+  const raw90=d90, roll7=rollingMean(d90,7), roll30=rollingMean(d90,30);
+  const trendDir=roll30[59]?((roll30[89]-roll30[59])/roll30[59]*100):0;
+  const br=prevKey?bridge(S.insMonth,prevKey):null;
+  const fv=fixedVsVariable(S.insMonth);
+  const gaps=loggingGaps(S.insMonth);
+  const sparks=categorySparks(6);
+  const conc=concentration(S.insMonth);
+  const odd=unusual(S.insMonth);
+  const buckets=sizeBuckets(S.insMonth);
+  const cum=arr=>{let t=0;return arr.map(v=>t+=v);};
+  const curCum=cum(cur.daily.slice(0,cur.elapsed));
+  const prevCum=prev?cum(prev.daily):[];
+
+  const dow=dowPattern();
+  const maxDow=Math.max(...dow,1);
+
+  // top descriptions this month
+  const bd={};for(const e of cur.rows){const k=(e.description||CATMAP[e.category_id].name).toLowerCase().trim();
+    bd[k]=(bd[k]||0)+e.amount;}
+  const top=Object.entries(bd).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+  return `
+  <div class="hd"><h1>Trends</h1><div class="sub lbl">${monLabel(S.insMonth)}${cur.isCur?' · in progress':''}
+    <span class="pill" style="margin-left:6px">swipe ↔ months</span></div></div>
+  <div style="padding:12px 0 2px"><div class="scrollx">
+    ${months.slice(0,14).map(m=>`<button class="chip ${m===S.insMonth?'on':''}" data-imon="${m}">${monLabel(m)}</button>`).join('')}
+  </div></div>
+
+  <div class="sec">
+    <div class="kpis">
+      <div class="kpi"><span class="lbl">Spent</span><div class="v">₹${money(cur.total)}</div>
+        <div class="d ${dTot===null?'dimc':dcls(dTot)}">${dTot===null?'no prior month':arrow(dTot)+' '+Math.abs(dTot).toFixed(0)+'% vs '+monLabel(prevKey)}</div></div>
+      <div class="kpi"><span class="lbl">Typical day</span><div class="v">₹${money(rday.median)}</div>
+        <div class="d dimc">median · mean is ₹${money(cur.perDay)}${rday.mean>rday.median*1.15?' (skewed)':''}</div></div>
+      ${cur.isCur?`<div class="kpi"><span class="lbl">Projected</span><div class="v">₹${money(cur.projected)}</div>
+        <div class="d dimc">at current run rate</div></div>`:''}
+      <div class="kpi"><span class="lbl">Biggest day</span><div class="v">₹${money(Math.max(...cur.daily,0))}</div>
+        <div class="d dimc">${cur.daily.indexOf(Math.max(...cur.daily))+1} ${monLabel(S.insMonth).split(' ')[0]}</div></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">12-month trend</span>
+    <div class="card" style="padding:14px 12px 8px">${barChart(l12.map(m=>m.total),l12.map(m=>monLabel(m.key).split(" ")[0]),hiIdx,'data-mbar')}</div>
+    <div class="hint" style="margin-left:2px">Tap a bar to jump to that month. Swipe the page sideways to step through months.</div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Smoothed trend · last 90 days</span>
+    <div class="card" style="padding:14px 12px 10px">
+      ${lineChart([
+        {data:raw90,color:'#3A404C'},
+        {data:roll7,color:'#858C9A'},
+        {data:roll30,color:'#FF7A3D',fill:true}
+      ])}
+      <div class="legend"><span><i style="background:#FF7A3D"></i>30-day</span>
+        <span><i style="background:#858C9A"></i>7-day</span>
+        <span><i style="background:#3A404C"></i>daily</span></div>
+    </div>
+    <div class="hint">Daily spending is too noisy to read a direction from. The 30-day line is the one to watch — it is currently
+      <b class="${trendDir>2?'bad':trendDir<-2?'good':''}">${trendDir>2?'rising':trendDir<-2?'falling':'flat'}</b>${Math.abs(trendDir)>2?' ('+(trendDir>0?'+':'')+trendDir.toFixed(0)+'% vs 30 days ago)':''}.</div>
+  </div>
+
+  ${prev?`<div class="sec">
+    <span class="lbl">What changed vs ${monLabel(prevKey)}</span>
+    <div class="card" style="padding:14px 12px 8px">${waterfallSVG(br)}</div>
+    <div class="hint">${br.net>0?'Up':'Down'} <b>₹${money(Math.abs(br.net))}</b>.
+      ${br.steps.length?`Biggest driver: <b>${esc(br.steps[0].name)}</b>, ${br.steps[0].delta>0?'up':'down'} ₹${money(Math.abs(br.steps[0].delta))}.`:''}
+      Red bars pushed the total up, green pulled it down.</div>
+  </div>`:''}
+
+  ${prev?`<div class="sec">
+    <span class="lbl">Cumulative burn vs ${monLabel(prevKey)}</span>
+    <div class="card" style="padding:14px 12px 10px">
+      ${lineChart([{data:prevCum,color:'#858C9A',dash:true},{data:curCum,color:'#FF7A3D',fill:true}])}
+      <div class="legend"><span><i style="background:#FF7A3D"></i>${monLabel(S.insMonth)}</span>
+        <span><i style="background:#858C9A"></i>${monLabel(prevKey)}</span></div>
+    </div></div>`:''}
+
+  <div class="sec">
+    <span class="lbl">Where it went</span>
+    <div class="card" style="padding:14px">
+    ${cats.map(([id,v])=>{
+      const p=prev?(prev.byCat[id]||0):null;
+      const d=p?delta(v,p):null;
+      return `<div class="bar">
+        <div class="top"><span style="display:flex;align-items:center;gap:8px;min-width:0">
+          <i class="dot" style="background:${CATMAP[id].color}"></i>
+          <b style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(CATMAP[id].name)}</b></span>
+          <span class="num" style="flex:none">₹${money(v)} <span class="dimc" style="font-size:11px">${(v/cur.total*100).toFixed(0)}%</span></span></div>
+        <div class="track"><div class="fill" style="width:${(v/maxCat*100).toFixed(1)}%;background:${CATMAP[id].color}"></div></div>
+        ${d!==null?`<div style="font-size:11px;margin-top:4px" class="${dcls(d)}">${arrow(d)} ${Math.abs(d).toFixed(0)}% vs prior month</div>`:''}
+      </div>`}).join('')}
+    </div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Committed vs decided</span>
+    <div class="card" style="padding:14px">
+      <div class="split">
+        <div class="splitbar">
+          <div style="width:${fv.pct.toFixed(1)}%;background:#858C9A"></div>
+          <div style="width:${(100-fv.pct).toFixed(1)}%;background:var(--hot)"></div>
+        </div>
+        <div class="splitrow"><span><i class="dot" style="background:#858C9A"></i>Fixed / recurring</span>
+          <span class="num">₹${money(fv.fixed)} · ${fv.pct.toFixed(0)}%</span></div>
+        <div class="splitrow"><span><i class="dot" style="background:var(--hot)"></i>Variable</span>
+          <span class="num">₹${money(fv.variable)} · ${(100-fv.pct).toFixed(0)}%</span></div>
+      </div>
+    </div>
+    <div class="hint">Fixed costs set the floor you cannot move this month. The
+      <b>₹${money(fv.variable)}</b> variable half is the part actually open to a decision — that is where
+      any change has to come from.</div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Every day of ${monLabel(S.insMonth)}</span>
+    <div class="card" style="padding:12px 8px 8px">${heatmapSVG(S.insMonth)}</div>
+    <div class="hint">Darker is heavier. ${gaps.blank?`<b>${gaps.blank} of ${gaps.upto} days have no entry at all</b> — either genuinely spent nothing, or missed. Every figure on this page is a floor, not a total.`:'Every day this month has at least one entry, so the numbers above are complete.'}</div>
+  </div>
+
+  ${!S.detail?`<button class="more" id="moreBtn">Deep dive: category drift, concentration, outliers ▾</button>`:`
+  ${sparks.length?`<div class="sec">
+    <span class="lbl">Category drift · 6 months</span>
+    <div class="card" style="padding:6px 14px">
+    ${sparks.map(sp=>`<div class="sparkrow">
+      <div class="sparkmeta"><div class="t">${esc(sp.name)}</div>
+        <div class="s num">₹${money(sp.recent)}${sp.drift===null?' <span class="dimc">new</span>':
+          ` <span class="${sp.drift>15?'bad':sp.drift<-15?'good':'dimc'}">${sp.drift>0?'+':''}${sp.drift.toFixed(0)}%</span>`}</div></div>
+      ${sparkSVG(sp.series,sp.color)}</div>`).join('')}
+    </div>
+    <div class="hint">Same shape, same scale, six panels — differences between categories jump out that a single combined chart would bury. The percentage compares this month against that category's own average of the prior five.</div>
+  </div>`:''}
+
+  ${conc&&conc.n>4?`<div class="sec">
+    <span class="lbl">Concentration</span>
+    <div class="card" style="padding:14px 12px 8px">${paretoSVG(conc.curve)}</div>
+    <div class="hint">Your biggest <b>${conc.txnsForHalf} ${conc.txnsForHalf===1?'transaction':'transactions'}</b>
+      (${conc.pctForHalf.toFixed(0)}% of ${conc.n}) account for half the month.
+      The top 20% carry <b>${(conc.top20*100).toFixed(0)}%</b>.
+      The dashed diagonal is what perfectly even spending would look like — the further the curve bows above it,
+      the more a few decisions dominate. The "80/20 rule" is quoted far more often than it holds, so this is measured, not assumed.</div>
+  </div>`:''}
+
+  ${odd.length?`<div class="sec">
+    <span class="lbl">Unusual for you</span>
+    <div class="card" style="padding:4px 14px">
+    ${odd.map(u=>`<button class="oddrow" data-edit="${u.e.id}">
+      <div style="min-width:0"><div class="t">${esc(u.e.description||CATMAP[u.e.category_id].name)}</div>
+        <div class="s">${u.mult>=2?u.mult.toFixed(1)+'× the usual':'well above usual'} ₹${money(u.typical)} for ${esc(u.scope)}</div></div>
+      <span class="num" style="font-weight:600;flex:none">₹${money(u.e.amount)}</span></button>`).join('')}
+    </div>
+    <div class="hint">Flagged by median ± 2.5 × median absolute deviation, not mean ± standard deviation — the mean and SD are themselves dragged around by the outliers you are trying to find, so they routinely miss obvious ones.</div>
+  </div>`:''}
+
+  <div class="sec">
+    <span class="lbl">Where the money sits by transaction size</span>
+    <div class="card" style="padding:14px 12px 8px">${histSVG(buckets)}</div>
+    <div class="hint">Bar height is total rupees, the count below is how many transactions. Tall bar with a small count means a few big decisions; short bars with big counts mean it leaks out in small pieces.</div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Spread of daily spend</span>
+    <div class="card" style="padding:14px">
+      <div class="statgrid">
+        <div><span class="lbl">Median</span><div class="v num">₹${money(rday.median)}</div></div>
+        <div><span class="lbl">Mean</span><div class="v num">₹${money(rday.mean)}</div></div>
+        <div><span class="lbl">Quiet day (25th)</span><div class="v num">₹${money(rday.q1)}</div></div>
+        <div><span class="lbl">Heavy day (75th)</span><div class="v num">₹${money(rday.q3)}</div></div>
+      </div>
+    </div>
+    <div class="hint">${rday.mean>rday.median*1.15
+      ?`Mean sits <b>${((rday.mean/rday.median-1)*100).toFixed(0)}% above</b> the median, so a handful of large days are pulling the average up. The median is the better description of a normal day for you.`
+      :'Mean and median are close, so your daily spending is fairly even — no small group of days is distorting the average.'}
+      Half your active days land between ₹${money(rday.q1)} and ₹${money(rday.q3)}.</div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Average by weekday (all time)</span>
+    <div class="card" style="padding:14px 12px 8px">${barChart(dow,DOW.map(d=>d[0]+d[1]),dow.indexOf(Math.max(...dow)))}</div>
+  </div>
+
+  ${top.length?`<div class="sec"><span class="lbl">Top items this month</span>
+    <div class="card" style="padding:4px 14px">
+    ${top.map(([k,v])=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:13.5px">
+      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize">${esc(k)}</span>
+      <span class="num" style="font-weight:600;flex:none">₹${money(v)}</span></div>`).join('')}
+    </div></div>`:''}
+  <button class="more" id="lessBtn">Hide extra detail ▴</button>`}
+  <div style="height:20px"></div>`;
+}
+
+function vRecurring(){
+  const R=detectRecurring();
+  const fixed=R.reduce((s,r)=>s+r.monthly,0);
+  const due=R.filter(r=>r.overdue);
+  return `
+  <div class="hd"><h1>Recurring</h1>
+    <div class="sub lbl">${R.length} detected · ~₹${money(fixed)}/month committed</div></div>
+  ${R.length?`
+    ${due.length?`<div class="banner">${due.length} ${due.length===1?'item is':'items are'} past their expected date — either you missed logging ${due.length===1?'it':'them'}, or ${due.length===1?'it':'they'} stopped.</div>`:''}
+    <div class="sec">
+      <span class="lbl">Fixed monthly baseline</span>
+      <div class="kpi" style="margin-top:8px"><div class="v" style="font-size:26px">₹${money(fixed)}</div>
+        <div class="d dimc">this much leaves your account every month before you decide anything</div></div>
+    </div>
+    <div class="sec"><span class="lbl">Detected patterns</span>
+    ${R.map(r=>`<div class="rec ${r.overdue?'due':''}" style="margin-top:10px">
+      <div class="h">
+        <span class="n"><i class="dot" style="background:${CATMAP[r.cat].color};display:inline-block;margin-right:7px"></i>${esc(r.label)}</span>
+        <span class="num" style="font-weight:600;flex:none">₹${money(r.mean)}</span>
+      </div>
+      <div class="meta">
+        <span>${r.cadence}</span>
+        <span>${r.n}× seen</span>
+        <span>${r.stable?'fixed amount':'₹'+money(r.min)+'–'+money(r.max)}</span>
+        <span>~₹${money(r.monthly)}/mo</span>
+        <span>${r.confidence}% conf</span>
+      </div>
+      <div class="meta" style="margin-top:7px">
+        <span style="background:none;border:none;padding:0">Last ${dayLabel(r.last)} · ${r.overdue?`<b class="hot">expected ${dayLabel(r.next)}</b>`:`next ~${dayLabel(r.next)}`}</span>
+      </div>
+    </div>`).join('')}
+    </div>`
+  :`<div class="empty">Nothing recurring yet.<br><br>Detection needs <b>3 or more</b> entries with a similar description and a steady gap between them. Keep logging — subscriptions, rent and fuel usually surface within two months.</div>`}
+  <div style="height:20px"></div>`;
+}
+
+function vMore(){
+  const n=live().length;
+  const first=live().length?live().map(e=>e.spent_on).sort()[0]:null;
+  return `
+  <div class="hd"><h1>More</h1><div class="sub lbl">${n} entries${first?' since '+dayLabel(first):''}</div></div>
+  <div class="sec"><span class="lbl">Data</span></div>
+  <div class="setrow"><div><div class="t">Export backup (JSON)</div>
+    <div class="s">Complete, re-importable. Save to Google Drive.</div></div><button id="expJson">Export</button></div>
+  <div class="setrow"><div><div class="t">Export spreadsheet (CSV)</div>
+    <div class="s">For Excel, or loading into Postgres later.</div></div><button id="expCsv">Export</button></div>
+  <div class="setrow"><div><div class="t">Import backup</div>
+    <div class="s">Merges by ID, newest edit wins. Never destructive.</div></div><button id="impBtn">Import</button></div>
+  <input type="file" id="impFile" accept=".json,application/json" style="display:none">
+  <div class="sec" style="margin-top:26px"><span class="lbl">Durability</span></div>
+  <div class="setrow"><div><div class="t">Persistent storage</div>
+    <div class="s">${S.persisted===true?'Granted — the browser will not evict your data.':S.persisted===false?'Not granted. Install to your home screen, then reopen.':'Unknown / unavailable in this context.'}</div></div>
+    <button id="persistBtn">${S.persisted===true?'Active':'Request'}</button></div>
+  <div class="setrow"><div><div class="t">Storage engine</div>
+    <div class="s">${DB.mem?'In-memory fallback — NOT persistent':'IndexedDB · schema v'+SCHEMA_VERSION+' · strict durability'}</div></div></div>
+  <div class="setrow" id="usageRow"><div><div class="t">Space used</div><div class="s" id="usage">measuring…</div></div></div>
+  <div class="setrow"><div><div class="t">Offline readiness</div>
+    <div class="s" id="swState">checking…</div></div></div>
+  <div class="sec" style="margin-top:26px"><span class="lbl">Categoriser</span></div>
+  <div class="setrow"><div><div class="t">Learned words</div>
+    <div class="s">${RULES.size} terms mapped from your own corrections</div></div><button id="clrRules">Reset</button></div>
+  <div class="sec" style="margin-top:26px;color:var(--dim);font-size:12px;line-height:1.6">
+    Data lives only on this device. Nothing is uploaded anywhere. Export weekly — that file is your only backup until a sync backend exists.
+  </div>
+  <div style="height:20px"></div>`;
+}
+
+/* ══════════════════ 7. SHEETS ══════════════════ */
+function openSheet(html){
+  const v=document.createElement('div');v.className='veil';
+  v.innerHTML=`<div class="sheet"><div class="grab"></div>${html}</div>`;
+  v.addEventListener('click',e=>{if(e.target===v)v.remove();});
+  document.body.appendChild(v);return v;
+}
+function closeSheet(){const v=$('.veil');if(v)v.remove();}
+
+function catSheet(current,onPick){
+  const v=openSheet(`<h3>Category</h3><div class="catgrid">
+    ${CATS.map(c=>`<button class="catbtn ${c.id===current?'on':''}" data-c="${c.id}">
+      <i class="dot" style="background:${c.color}"></i>${esc(c.name)}</button>`).join('')}
+  </div><div style="height:14px"></div>`);
+  v.querySelectorAll('[data-c]').forEach(b=>b.onclick=()=>{buzz();closeSheet();onPick(b.dataset.c);});
+}
+
+function editSheet(id,override){
+  const e=EXP.find(x=>x.id===id);if(!e)return;
+  const st=override||{amount:String(e.amount),desc:e.description||'',date:e.spent_on,cat:e.category_id};
+  const v=openSheet(`<h3>Edit entry</h3>
+    <div class="pad">
+      <div class="frow"><span class="lbl">Amount</span>
+        <input id="eAmt" type="number" inputmode="decimal" step="0.01" min="0.01" value="${esc(st.amount)}"></div>
+      <div class="frow"><span class="lbl">What</span><input id="eDesc" value="${esc(st.desc)}" maxlength="90"></div>
+      <div class="frow"><span class="lbl">Date</span><input id="eDate" type="date" value="${st.date}" max="${today()}"></div>
+      <div class="gu"><button class="chip on" id="eCat">
+        <i class="dot" style="background:${CATMAP[st.cat].color}"></i>${esc(CATMAP[st.cat].name)}</button></div>
+      <div style="font-size:11px;color:var(--dim);margin-top:12px" class="num">
+        created ${e.created_at.slice(0,16).replace('T',' ')}${e.updated_at!==e.created_at?' · edited '+e.updated_at.slice(0,16).replace('T',' '):''}</div>
+    </div>
+    <div class="act"><button class="prim" id="eSave">Save changes</button></div>
+    <div class="act" style="margin-top:22px"><button class="del" id="eDel">Delete this entry</button></div>`);
+  const grab=()=>({amount:$('#eAmt',v).value,desc:$('#eDesc',v).value,date:$('#eDate',v).value||st.date,cat:st.cat});
+  $('#eCat',v).onclick=()=>{const live=grab();closeSheet();
+    catSheet(st.cat,c=>editSheet(id,{...live,cat:c}));};
+  $('#eDel',v).onclick=async()=>{
+    e.deleted_at=now();e.updated_at=now();               // soft delete — survives a future sync
+    await DB.put('expenses',e);await reload();closeSheet();buzz(14);
+    toastUndo('Deleted ₹'+money(e.amount),async()=>{
+      e.deleted_at=null;e.updated_at=now();await DB.put('expenses',e);await reload();toast('Restored');
+    });
+  };
+  $('#eSave',v).onclick=async()=>{
+    const f=grab(),a=parseFloat(f.amount);
+    if(!(a>0))return toast('Amount must be greater than 0');
+    Object.assign(e,{amount:Math.round(a*100)/100,description:f.desc.trim(),
+      spent_on:f.date,category_id:f.cat,updated_at:now()});
+    await DB.put('expenses',e);await learn(e.description,e.category_id);
+    await reload();closeSheet();toast('Updated');
+  };
+}
+
+function dateSheet(){
+  const v=openSheet(`<h3>Date of expense</h3>
+    <div class="pad">
+      <div class="scrollx" style="padding:0 0 12px">
+        ${[0,1,2,3,4,5,6].map(i=>{const d=addDays(today(),-i);
+          return `<button class="chip ${d===S.date?'on':''}" data-d="${d}">${i===0?'Today':i===1?'Yesterday':dayLabel(d)}</button>`}).join('')}
+      </div>
+      <div class="frow"><span class="lbl">Or pick</span><input type="date" id="dPick" value="${S.date}" max="${today()}"></div>
+    </div><div style="height:16px"></div>`);
+  v.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{S.date=b.dataset.d;S.dateManual=true;closeSheet();render();});
+  $('#dPick',v).onchange=e=>{if(e.target.value){S.date=e.target.value;S.dateManual=true;closeSheet();render();}};
+}
+
+/* ══════════════════ 8. ACTIONS ══════════════════ */
+async function saveExpense(){
+  const a=addState();
+  if(!(a.amount>0))return;
+  const cat=a.cat||'misc';
+  const t=now();
+  const row={
+    id:uid(), amount:Math.round(a.amount*100)/100, spent_on:a.date, category_id:cat,
+    description:a.desc, created_at:t, updated_at:t, deleted_at:null, schema:SCHEMA_VERSION
+  };
+  await DB.put('expenses',row);
+  if(S.catManual)await learn(row.description,cat);   // only learn from confirmed choices
+  EXP.unshift(row);
+  buzz(14);toast('₹'+money2(row.amount)+' · '+CATMAP[cat].name);
+  S.quick='';S.amount='';S.desc='';S.cat=null;S.catManual=false;S.dateManual=false;S.date=today();
+  render();
+  const f=$('#quick');if(f)f.focus();          // stay in flow for the next entry
+}
+
+function toCSV(){
+  const head=['id','date','amount','category','description','created_at','updated_at'];
+  const esc2=s=>`"${String(s??'').replace(/"/g,'""')}"`;
+  const rows=live().slice().sort((a,b)=>a.spent_on<b.spent_on?-1:1)
+    .map(e=>[e.id,e.spent_on,e.amount,CATMAP[e.category_id].name,e.description,e.created_at,e.updated_at].map(esc2).join(','));
+  return head.join(',')+'\n'+rows.join('\n');
+}
+function download(name,text,type){
+  const b=new Blob([text],{type});const u=URL.createObjectURL(b);
+  const a=document.createElement('a');a.href=u;a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(u),1500);
+}
+async function markExport(){await DB.put('meta',{k:'last_export',v:today()});S.backupNudge=0;}
+
+async function doImport(file){
+  try{
+    const j=JSON.parse(await file.text());
+    if(!j.expenses||!Array.isArray(j.expenses))throw new Error('not a Ledger backup');
+    const byId=new Map(EXP.map(e=>[e.id,e]));
+    const merged=[];
+    for(const r of j.expenses){
+      if(!r.id||!(r.amount>0)||!/^\d{4}-\d{2}-\d{2}$/.test(r.spent_on))continue;
+      if(!CATMAP[r.category_id])r.category_id='misc';
+      const ex=byId.get(r.id);
+      if(!ex||(r.updated_at||'')>(ex.updated_at||''))merged.push(r);
+    }
+    if(merged.length)await DB.put('expenses',merged);   // single transaction: all or nothing
+    if(j.rules&&Array.isArray(j.rules)&&j.rules.length)await DB.put('rules',j.rules);
+    await reload();
+    toast(merged.length+' entries merged');
+  }catch(e){toast('Import failed: '+e.message);}
+}
+
+/* ══════════════════ 9. BOOT + RENDER ══════════════════ */
+async function reload(){
+  const [ex,ru]=await Promise.all([DB.all('expenses'),DB.all('rules')]);
+  EXP=ex.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
+  RULES=new Map(ru.map(r=>[r.token,r]));
+  render();
+}
+
+const NAVS=[
+  ['add','Add','M12 5v14M5 12h14'],
+  ['log','Log','M4 6h16M4 12h16M4 18h11'],
+  ['ins','Trends','M4 19V5M4 19h16M8 15l3-5 3 3 4-7'],
+  ['rec','Recurring','M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4'],
+  ['more','More','M5 12h.01M12 12h.01M19 12h.01']
+];
+/* Horizontal swipe to step through months — a date dropdown is a poor fit for
+   a thumb, and stepping periods is the single most common action on these screens. */
+function swipeMonths(){
+  const el=$('#app');let x0=null,y0=null;
+  el.classList.add('swipe');
+  el.ontouchstart=e=>{if(e.touches.length!==1)return;x0=e.touches[0].clientX;y0=e.touches[0].clientY;};
+  el.ontouchend=e=>{
+    if(x0===null)return;
+    const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0;
+    x0=null;
+    if(Math.abs(dx)<60||Math.abs(dx)<Math.abs(dy)*1.6)return;   // ignore vertical scrolls
+    const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
+    const key=S.view==='ins'?'insMonth':'logMonth';
+    const i=months.indexOf(S[key]);
+    const j=i+(dx<0?1:-1);                                       // swipe left = older
+    if(j<0||j>=months.length)return;
+    S[key]=months[j];buzz();render();window.scrollTo(0,0);
+  };
+}
+
+function render(){
+  const app=$('#app');
+  app.ontouchstart=app.ontouchend=null;app.classList.remove('swipe');   // reset per-view gestures
+  $('#app').innerHTML={add:vAdd,log:vLog,ins:vInsights,rec:vRecurring,more:vMore}[S.view]();
+  $('#nav').innerHTML=NAVS.map(([k,l,d])=>`<button data-v="${k}" class="${S.view===k?'on':''}"
+    aria-label="${l}" aria-current="${S.view===k?'page':'false'}">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('');
+  bind();
+}
+function bind(){
+  document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{
+    if(S.view!==b.dataset.v){S.view=b.dataset.v;buzz();window.scrollTo(0,0);render();}});
+  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
+
+  if(S.view==='add'){
+    const refresh=()=>{                    // patch preview + save only; never re-render the focused input
+      $('#preview').innerHTML=previewHTML();
+      const s=$('#save');s.disabled=!(addState().amount>0);s.textContent=saveLabel();
+      bindPreview();
+    };
+    const bindPreview=()=>{
+      $('#catbtn').onclick=()=>{const a=addState();
+        catSheet(a.cat,c=>{S.cat=c;S.catManual=true;refresh();});};
+      $('#datebtn').onclick=dateSheet;
+    };
+    bindPreview();
+    document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{
+      if(S.mode===b.dataset.mode)return;
+      const a=addState();                   // carry work across the mode switch
+      S.mode=b.dataset.mode;
+      if(S.mode==='pad'){S.amount=a.amount?String(a.amount):'';S.desc=a.desc;}
+      else S.quick=[a.amount||'',a.desc].filter(Boolean).join(' ').trim();
+      buzz();render();
+    });
+    document.querySelectorAll('[data-fq]').forEach(b=>b.onclick=()=>{
+      const f=frequents()[+b.dataset.fq];if(!f)return;
+      S.mode==='quick'?S.quick=f.label+' '+f.amt:(S.amount=String(f.amt),S.desc=f.label);
+      S.cat=f.cat;S.catManual=true;buzz();render();
+    });
+    const q=$('#quick');
+    if(q){q.oninput=()=>{S.quick=q.value;refresh();};
+      q.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();if(addState().amount>0)saveExpense();}};}
+    const d=$('#desc');
+    if(d){d.oninput=()=>{S.desc=d.value;refresh();};
+      d.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();d.blur();}};}
+    document.querySelectorAll('.key').forEach(b=>b.onclick=()=>{
+      const k=b.dataset.k;buzz(6);
+      if(k==='del')S.amount=S.amount.slice(0,-1);
+      else if(k==='.'){if(!S.amount.includes('.'))S.amount=(S.amount||'0')+'.';}
+      else{
+        const dec=S.amount.split('.')[1];
+        if(dec&&dec.length>=2)return;
+        if(S.amount.replace('.','').length>=9)return;
+        S.amount=(S.amount==='0'?'':S.amount)+k;
+      }
+      refresh();
+    });
+    $('#save').onclick=saveExpense;
+  }
+  if(S.view==='log'){
+    document.querySelectorAll('[data-mon]').forEach(b=>b.onclick=()=>{S.logMonth=b.dataset.mon;render();});
+    const q=$('#q');
+    if(q)q.oninput=()=>{               // patch only the list; never blow away the focused input
+      S.q=q.value;
+      const box=$('#loglist');box.innerHTML=logList();
+      box.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>editSheet(b.dataset.edit));
+    };
+  }
+  if(S.view==='ins'){
+    document.querySelectorAll('[data-imon]').forEach(b=>b.onclick=()=>{S.insMonth=b.dataset.imon;render();});
+    document.querySelectorAll('[data-mbar]').forEach(r=>r.onclick=()=>{
+      const k=last12()[+r.dataset.mbar].key;
+      if(live().some(e=>monKey(e.spent_on)===k)){S.insMonth=k;buzz();render();}
+      else toast('Nothing recorded in '+monLabel(k));
+    });
+    const mb=$('#moreBtn');if(mb)mb.onclick=()=>{S.detail=true;render();};
+    const lb=$('#lessBtn');if(lb)lb.onclick=()=>{S.detail=false;render();window.scrollTo(0,0);};
+  }
+  if(S.view==='ins'||S.view==='log')swipeMonths();
+  if(S.view==='more'){
+    $('#expJson').onclick=async()=>{
+      download('ledger-backup-'+today()+'.json',JSON.stringify({
+        app:'ledger',schema:SCHEMA_VERSION,exported_at:now(),
+        expenses:EXP,categories:CATS,rules:[...RULES.values()]},null,1),'application/json');
+      await markExport();toast('Backup downloaded');
+    };
+    $('#expCsv').onclick=async()=>{download('expenses-'+today()+'.csv',toCSV(),'text/csv');await markExport();};
+    $('#impBtn').onclick=()=>$('#impFile').click();
+    $('#impFile').onchange=e=>{if(e.target.files[0])doImport(e.target.files[0]);};
+    $('#persistBtn').onclick=async()=>{S.persisted=await requestPersist();
+      toast(S.persisted?'Persistent storage granted':'Denied — install to home screen first');render();};
+    $('#clrRules').onclick=async()=>{
+      if(!confirm('Forget all learned word→category mappings? Seed keywords stay.'))return;
+      for(const t of RULES.keys())await DB.del('rules',t);
+      RULES.clear();render();toast('Categoriser reset');
+    };
+    const sw=$('#swState');
+    if(sw){
+      if(!('serviceWorker'in navigator))sw.textContent='Service workers unsupported here — needs HTTPS.';
+      else navigator.serviceWorker.getRegistration().then(r=>{
+        sw.textContent=r&&r.active
+          ?'Ready. App shell, fonts and icons are cached — opens and records with no network.'
+          :'Not registered yet. Open once over HTTPS, then relaunch.';
+      }).catch(()=>{sw.textContent='Unknown';});
+    }
+    if(navigator.storage&&navigator.storage.estimate){
+      navigator.storage.estimate().then(e=>{const u=$('#usage');
+        if(u)u.textContent=((e.usage||0)/1024).toFixed(0)+' KB used of '+((e.quota||0)/1048576/1024).toFixed(1)+' GB available';});
+    }
+  }
+}
+
+(async function boot(){
+  const real=await DB.open();
+  let cats=await DB.all('categories');
+  if(!cats.length){
+    cats=SEED_CATS.map(([id,name,color],i)=>({id,name,color,sort:i,is_archived:0}));
+    await DB.put('categories',cats);
+    await DB.put('meta',{k:'schema_version',v:SCHEMA_VERSION});
+  }
+  CATS=cats.sort((a,b)=>a.sort-b.sort);CATMAP=Object.fromEntries(CATS.map(c=>[c.id,c]));
+  S.persisted=real?await requestPersist():null;
+  const le=await DB.get('meta','last_export');
+  const first=(await DB.all('expenses')).length;
+  S.backupNudge=(first>15&&(!le||daysBetween(le.v,today())>14))?(le?daysBetween(le.v,today()):999):0;
+  if(S.backupNudge===999)S.backupNudge='many';
+  await reload();
+  if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+})();
+</script>
+</body>
+</html>
