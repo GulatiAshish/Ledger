@@ -1,6 +1,6 @@
 /* Ledger service worker.
    Bump CACHE when you change any file below, otherwise the phone keeps the old copy. */
-const CACHE = 'ledger-v6';
+const CACHE = 'ledger-v7';
 
 /* Everything the app needs to run. There are no other network calls anywhere —
    fonts are self-hosted, charts are inline SVG, storage is IndexedDB. */
@@ -11,9 +11,9 @@ const CORE = [
   './icon-192.png',
   './icon-512.png',
   './icon-maskable-512.png',
-  './fonts/archivo-var.woff2',
-  './fonts/plexmono-400.woff2',
-  './fonts/plexmono-600.woff2'
+  './archivo-var.woff2',
+  './plexmono-400.woff2',
+  './plexmono-600.woff2'
 ];
 
 self.addEventListener('install', e => {
