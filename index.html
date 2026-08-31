@@ -271,6 +271,20 @@ const money=n=>{const v=Math.round(n||0);return v.toLocaleString('en-IN');};
 const money2=n=>Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
 const monKey=s=>s.slice(0,7);
 const monLabel=k=>{const[y,m]=k.split('-');return MON[+m-1]+" '"+y.slice(2);};
+/* created_at / updated_at are stored as UTC (toISOString), which is correct —
+   an instant needs a zone. But slicing that string and printing it shows UTC
+   as though it were local: an entry saved at 15:12 IST rendered as 09:42.
+   Parse it back to a Date and format in the device's own zone. */
+const localTs=iso=>{
+  if(!iso)return '';
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return String(iso).slice(0,16).replace('T',' ');
+  const t=pad2(d.getHours())+':'+pad2(d.getMinutes());
+  const ds=dstr(d);
+  if(ds===today())return 'today '+t;
+  if(ds===addDays(today(),-1))return 'yesterday '+t;
+  return ds+' '+t;
+};
 const dayLabel=s=>{const d=parseD(s),t=today();
   if(s===t)return'Today';if(s===addDays(t,-1))return'Yesterday';
   return DOW[d.getDay()]+', '+d.getDate()+' '+MON[d.getMonth()]+(monKey(s)!==monKey(t)?' '+d.getFullYear():'');};
@@ -1307,7 +1321,7 @@ function editSheet(id,override){
       <div class="gu"><button class="chip on" id="eCat">
         <i class="dot" style="background:${CATMAP[st.cat].color}"></i>${esc(CATMAP[st.cat].name)}</button></div>
       <div style="font-size:11px;color:var(--dim);margin-top:12px" class="num">
-        created ${e.created_at.slice(0,16).replace('T',' ')}${e.updated_at!==e.created_at?' · edited '+e.updated_at.slice(0,16).replace('T',' '):''}</div>
+        created ${localTs(e.created_at)}${e.updated_at!==e.created_at?' · edited '+localTs(e.updated_at):''}</div>
     </div>
     <div class="act"><button class="prim" id="eSave">Save changes</button></div>
     <div class="act" style="margin-top:22px"><button class="del" id="eDel">Delete this entry</button></div>`);
