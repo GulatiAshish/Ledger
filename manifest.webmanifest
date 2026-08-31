@@ -1,20 +1,85 @@
 {
   "name": "Ledger — Daily Expenses",
   "short_name": "Ledger",
-  "description": "Offline-first daily expense tracker with trend analysis and recurring-payment detection.",
+  "description": "Offline-first expense tracker by Ashish Gulati. No account, no server, no data leaves your device.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0E0F12",
   "theme_color": "#0E0F12",
-  "categories": ["finance", "productivity"],
+  "categories": [
+    "finance",
+    "productivity"
+  ],
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "shortcuts": [
-    { "name": "Add expense", "short_name": "Add", "url": "./index.html" }
-  ]
+    {
+      "name": "Add expense",
+      "short_name": "Add",
+      "description": "Jump straight to the entry field",
+      "url": "./index.html?go=add",
+      "icons": [
+        {
+          "src": "shortcut-add.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Today's log",
+      "short_name": "Log",
+      "description": "See what you have recorded",
+      "url": "./index.html?go=log",
+      "icons": [
+        {
+          "src": "shortcut-log.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Trends",
+      "short_name": "Trends",
+      "description": "Monthly analysis",
+      "url": "./index.html?go=ins",
+      "icons": [
+        {
+          "src": "shortcut-trends.png",
+          "sizes": "96x96",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "./index.html",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
 }
