@@ -37,7 +37,7 @@ Step 6 matters. It's what stops Chrome from evicting your data under storage pre
 
 **Case sensitivity:** the username part of a GitHub Pages URL is case-insensitive (domains are), but **the repository name in the path is not**. A repo called `Ledger` is served only at `https://<username>.github.io/Ledger/`; the lowercase spelling 404s. Every path in this app is relative (`./index.html`, `scope: "./"`, bare filenames), so it runs correctly at any path with any casing — you just have to type the URL the way the repo is actually named.
 
-**Redeploying:** bump `CACHE = 'ledger-v6'` to `'ledger-v7'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
+**Redeploying:** bump `CACHE = 'ledger-v9'` to `'ledger-v10'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
 
 ---
 
@@ -225,10 +225,60 @@ One related detail: if you edit an old expense whose category has since been hid
 
 ---
 
+## 4c. Forward view, habit cost, entry guard
+
+Three things that use data already in the app rather than new inputs — which matters, because every new *input* channel is closed on this platform. A web app cannot read SMS on Android. Receipt OCR needs a model too large to ship offline. Bank feeds need account-aggregator licensing. So the only room left is inference.
+
+**Committed over the next 30 days.** Every expense tracker looks backwards, including this one until now. But the recurring detector already knows what is due and roughly when, which is enough to project the *committed* side of next month: rent on its date, subscriptions on theirs, groceries on their weekly cycle. Overdue items are carried in too.
+
+Only commitments are forecast. Discretionary spending is a decision made daily, not a schedule, so it is estimated separately from your recent non-recurring run rate and shown beside — never blended into one number that would imply more certainty than exists.
+
+**Annualised habit cost.** Frequency × unit price, projected from your actual pace. A ₹380 lunch reads differently as ₹5,700 a month. Guard: an item must appear at least 4 times across at least six weeks. Annualising from two events a week apart produces confident nonsense, and a wrong big number is worse than no number.
+
+**Entry-time typo and duplicate guard.** The outlier check in Trends runs days later — by which point a mistyped extra zero has already skewed the median, the variance bridge, the concentration curve and the recurring amounts it feeds. So the same check now runs as you type, before saving.
+
+The threshold is deliberately stricter than review-time: **3.5 MAD at entry versus 2.5 in Trends**, because a false alarm here interrupts every single entry, while a false alarm in Trends is just a row you skip. On test data ₹25,000 of fuel flags at 10× the usual ₹2,500, while a normal ₹380 lunch and a normal ₹2,500 fill-up pass silently. The duplicate check matches description, amount and date. Both warn; neither blocks.
+
+---
+
+## 4d. Viewing on a laptop
+
+**More → Open a backup (read-only).** Load a backup JSON and browse the Log and Trends tabs on a bigger screen.
+
+**It is read-only on purpose, and that is the whole design.** IndexedDB is per-device. A writable laptop copy would be a second database with no sync between them — edit on both, and the next import silently discards one side's changes, because merge is last-write-wins on `updated_at` and has no way to know which edit you meant to keep. A viewer that never writes cannot diverge. The phone stays the single source of truth.
+
+While a backup is open, the Add tab disappears from the nav, every write path refuses, and a banner sits at the top. Exit reloads back to your real data.
+
+If you later want genuine two-way laptop editing, that is the Postgres replica in §7 — real sync, not two hopeful copies of a file.
+
+---
+
 ## 5. How the categoriser works
 
 No API call, no key, works offline.
 
 1. **Seed keywords** — ~250 India-first terms (`swiggy`, `dmart`, `fastag`, `jio`, `apollo`, `bookmyshow`). Cold-start priors only.
 2. **Learned rules** — every time you *manually pick* a category, each significant word in the description gets a +1 vote for that category, stored in the `rules` table. Learned votes are weighted 3× over seeds.
-3. So `client lunch at Blue Diamond` gets categor
+3. So `client lunch at Blue Diamond` gets categorised as Food the first time by the word "lunch"; correct it to **Business** twice and `blue`, `diamond` and `client` permanently outrank the seed.
+
+It only learns from confirmed choices, never from its own guesses — otherwise it reinforces its own mistakes.
+
+---
+
+## 6. Recurring detection
+
+Group entries by a two-token description signature → require **≥3 occurrences** → take the median gap between them → match against weekly / fortnightly / monthly / quarterly / half-yearly / yearly with per-cadence tolerance → require ≥60% of gaps within tolerance and amount coefficient-of-variation ≤0.45.
+
+Output: cadence, mean amount, normalised monthly cost, next expected date, and an **overdue** flag when something's late — which means either you forgot to log it, or the subscription lapsed. The sum of all normalised monthly costs is your fixed baseline: what leaves your account before you decide anything.
+
+Expect roughly two months of data before it's useful.
+
+---
+
+## 7. Roadmap
+
+**v2 — Spring Boot + Postgres replica.** Push-only sync: phone stays the source of truth, backend is a durable replica with real constraints. `POST /sync` takes rows where `updated_at > last_sync`, upserts on `id` with last-write-wins. Add it *after* the schema has survived two months of real use, because it will change.
+
+**v3 — Kotlin native.** Room uses the DDL above verbatim. Migration is a one-time JSON import.
+
+Don't build v2 until v1 has real data in it. The schema is the thing worth getting right, and only daily use tells you where it's wrong.
