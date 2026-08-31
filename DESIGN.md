@@ -1,5 +1,4 @@
 # Design notes
-
 Reasoning behind the interface and the analytics. Most decisions here were made against published research rather than taste, and the sources are cited where they apply.
 
 ---
@@ -119,7 +118,8 @@ ESLint 9 with correctness and security rules, a 99-assertion property suite, and
 **Property suite:** quantile and MAD against hand-computed values; `addDays`/`daysBetween` proven inverse across 400 days, month ends, year ends, and both leap and non-leap February; Indian lakh grouping; and invariants on generated data — daily totals sum to the month, bridge steps sum to the net change, the concentration curve is monotonic and terminates at exactly 1.0, size buckets reconcile to total and count, week buckets tile with no gaps, cumulative series never decrease, and compare series align across all twenty range × metric combinations. Every analytic also runs against empty data and against a single entry.
 
 ---
-
+*Ledger — Copyright 2026 Ashish Gulati — Apache-2.0*
+---
 ## Sources
 
 - Nielsen Norman Group — [confirmation dialogs](https://www.nngroup.com/articles/confirmation-dialog/), [proximity of consequential options](https://www.nngroup.com/articles/proximity-consequential-options/)
