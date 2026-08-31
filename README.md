@@ -37,7 +37,7 @@ Step 6 matters. It's what stops Chrome from evicting your data under storage pre
 
 **Case sensitivity:** the username part of a GitHub Pages URL is case-insensitive (domains are), but **the repository name in the path is not**. A repo called `Ledger` is served only at `https://<username>.github.io/Ledger/`; the lowercase spelling 404s. Every path in this app is relative (`./index.html`, `scope: "./"`, bare filenames), so it runs correctly at any path with any casing — you just have to type the URL the way the repo is actually named.
 
-**Redeploying:** bump `CACHE = 'ledger-v9'` to `'ledger-v10'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
+**Redeploying:** bump `CACHE = 'ledger-v15'` to `'ledger-v16'` in `sw.js`, or the phone keeps serving the old copy. The new version appears on the *next* launch after that, not the current one — that's the deliberate trade for instant opening (see §4).
 
 ---
 
@@ -189,29 +189,50 @@ Sources: NN/g on [confirmation dialogs](https://www.nngroup.com/articles/confirm
 
 ---
 
-## 4a. What's in the Trends tab
+## 4a. Trends: four views, not one scroll
 
-Nine analyses beyond the headline numbers, each chosen against a specific source rather than because the chart looked good.
+The page had grown to fifteen sections in a single vertical scroll. That is the worst-performing shape for this content, and there is a direct result on it: Harms et al. (2015) tested four layouts for long content on smartphones and found **plain scrolling performed worst of the four**, with tabs, menus and collapsible sections all doing better. NN/g's dashboard research says the same from the other side — users abandon dashboards that are too dense, and the fix is a top-level summary with drill-down rather than one packed view.
 
-**Typical day = median, not mean.** Spending is strongly right-skewed — a few large days drag the average far above what a normal day looks like. On realistic test data the mean sat 2.9× the median. Robust-statistics practice is to lead with the median and show the mean beside it, so the gap is visible instead of misleading. The spread panel adds the 25th and 75th percentiles: half your active days fall in that band.
+So Trends is now four views behind a sticky segmented control: **Overview · Where · When · Habits**. Segmented controls are the correct component here rather than tabs or a menu — iOS and Fluent guidance both scope them to switching between views *within a single context*, which is exactly what these are, and four sits under the five-segment limit for a phone. Labels name the view rather than the feature. Horizontal swipe moves between views, the way a tabbed pager does.
 
-**Smoothed trend (90 days).** Raw daily spending has no readable direction. Three lines: raw, 7-day and 30-day trailing means. The 30-day line is the signal; the app states plainly whether it's rising, falling or flat and by how much.
+The longest single view is now under half the old scroll length.
 
-**What changed vs last month — a variance bridge.** The single most useful chart here. It decomposes the month-over-month difference into the categories that caused it. Waterfall practice says: order by absolute impact, fold minor drivers into "Other" (a bridge with 17 tiny bars explains nothing), neutral colour for the start and end totals, directional colour for the movements. Red pushed the total up, green pulled it down.
+**One period control per view.** This is the change that made the split worth doing. Previously a range selector (1M–ALL) and a month picker sat on the same screen meaning different things, which is a mapping problem — the relationship between a control and its effect has to be obvious. Now: Overview is range-based, Where and When are month-based, Habits is all-time. Each view has exactly one, and it is unambiguous.
 
-**Committed vs decided.** Standard fixed-versus-variable framing: fixed costs set the floor you can't move this month, variable is the part actually open to a decision. The recurring detector already identifies your committed payments, so this comes free — and it's the number that tells you where a change would have to come from.
+**Answer first.** Tableau's eye-tracking work found big numbers command attention before anything else, and that in a repeating row of cards attention is strongest at the first item and falls away after it. So the page opens with the conclusion in plain words — *"₹58,551 in Aug '26 — 75% more than Jul '26. Mostly Travel, up ₹28,000."* — and the month total is a single full-width figure above the smaller supporting stats, rather than four equal cards that force you to work out which matters.
 
-**Calendar heatmap.** Calendar views place daily data in a familiar grid, which makes weekly and seasonal patterns readable at a glance. It also does something the other charts can't: it shows **blank days**. If you missed logging, every figure on the page is a floor rather than a total, and the app says so rather than quietly understating.
+**Section notes.** Each block carries one line saying how to read it. Lack of contextual clarity is a standard dashboard failure: a chart with no framing leaves you guessing what it is telling you.
 
-**Category drift — small multiples.** Six categories, six months each, same shape and same scale. Tufte's argument for the form is that constant axes across many small panels let differences surface at a glance, where a single combined chart would bury them. Each panel compares this month against that category's own average of the prior five, so you see what's creeping up.
+### The chart itself
 
-**Concentration.** Everyone quotes the 80/20 rule; Byron Sharp's research shows the real ratio is rarely that extreme — nearer 50/20 in consumer data (Goodhardt's 20:30:50 law). So this measures your actual curve rather than asserting the rule: how many transactions carry half your month, and what share the top 20% actually hold. The dashed diagonal is perfectly even spending; the further the curve bows above it, the more a few decisions dominate.
+**Timeframe selector directly under the chart** — `1M · 3M · 6M · 1Y · ALL`. Trading-app UX guidance is specific that these belong adjacent to the chart, not in a menu, since rapid switching is the core behaviour. It also puts them in the thumb zone.
 
-**Unusual for you.** Flagged by **median ± 2.5 × MAD** (Leys et al., 2013), not mean ± SD. The reason is specific: the mean and standard deviation are themselves distorted by the outliers you're hunting, so that rule routinely misses obvious ones. MAD has a 50% breakdown point and doesn't. Each transaction is compared against its own category's history — a large rent payment isn't unusual, a large coffee is — falling back to all-spending for categories with too little history to have a norm. Tap any flagged item to open it.
+**Metric toggles:** Spend, Entries, Avg size, Running total — whether a heavy month came from spending more, buying more often, or buying dearer things.
 
-**Transaction-size distribution.** Bar height is total rupees, the count beneath is how many transactions. A tall bar with a small count means a few big decisions; short bars with high counts mean it leaks away in small pieces. Two very different problems with two very different fixes.
+**Overlays:** Smooth (trailing average) and Compare previous (preceding equal window, dashed).
 
-The last five sit behind one disclosure toggle, keeping the default view to one thought per screen.
+**Drag to read any point.** Apple Stocks updates the value above the chart as the pointer moves; same here, with a crosshair and a haptic tick. Matters more on a phone than desktop because there is no hover. Pointer events, so it works with a mouse in the laptop viewer.
+
+**Buckets adapt to range:** daily to 3 months, weekly to a year, monthly for ALL. 365 daily points on a 340px chart is noise.
+
+**Gesture conflict, resolved twice.** Charting guidance warns against blocking gestures. The month-swipe handler ignores touches starting inside the chart, and page-level swipe on Trends now moves between the four views rather than between months — months have their own picker, so the gesture was doing redundant work.
+
+---
+
+
+**Timeframe selector sits directly under the chart** — `1M · 3M · 6M · 1Y · ALL`. Trading-app UX guidance is specific that timeframe selectors belong adjacent to the chart module rather than in a menu, since rapid switching is the core behaviour and friction there breaks the exploration. It also puts them in the thumb zone.
+
+**Metric toggles:** Spend, Entries, Avg size, Running total. The same window answers four different questions — whether a heavy month came from spending more, or buying more often, or buying dearer things.
+
+**Overlays:** *Smooth* (trailing average over the raw line) and *Compare previous* (the preceding equal-length window, dashed). Smooth is disabled on Running total, which is monotonic by construction and already smooth.
+
+**Drag across the chart to read any point.** Apple Stocks updates the date and value above the chart as the pointer moves; the same here, with a crosshair and a haptic tick. This matters more on a phone than on desktop because there is no hover — without it, a value can only be estimated by eye. Built on pointer events, so it works with a mouse in the laptop viewer too.
+
+**Buckets adapt to the range,** as stock charts do: daily up to 3 months, weekly to a year, monthly for ALL. 365 daily points across a 340px-wide chart is noise, not detail.
+
+**One gesture conflict, resolved.** Trends already used horizontal swipe to step through months, which would have hijacked every scrub drag. Charting guidance flags this directly — avoid blocking gestures. The month-swipe handler now ignores any touch starting inside the chart, and the chart sets `touch-action: none` so the page doesn't scroll under the drag.
+
+This replaced the old static "12-month trend" bars and the fixed "Smoothed trend · 90 days" panel — the hero chart does both jobs and more. Everything month-specific (the variance bridge, category split, heatmap, deep dive) now sits below under a **Month detail** heading with its own month picker, so the two period controls never get confused for each other.
 
 ---
 
@@ -253,6 +274,62 @@ If you later want genuine two-way laptop editing, that is the Postgres replica i
 
 ---
 
+## 4e. Money
+
+Income turns absolute figures into ratios, and ratios are where the meaning is. ₹58,000 spent says nothing alone; ₹58,000 against ₹80,000 earned is a savings rate.
+
+**Take-home, not gross.** Tax and deductions never reach the account, so counting them would flatter the savings rate and make safe-to-spend actively wrong.
+
+**One monthly figure plus per-month overrides.** Income here is mostly steady with minor variation, so a single estimate covers the norm and an override covers the month with an incentive, a bonus, or a gap.
+
+**What it shows:** savings rate as the headline; safe-to-spend for the rest of the month with commitments still due set aside first, and the daily figure that implies; a four-way split of where income went (committed / variable / moved to savings / left in account); savings rate charted across twelve months; and every category as a share of *income* rather than share of spending — a category at 4% of spending may be 1% of income, and that is the number that matters.
+
+### At this pace
+
+A forward projection from recent spending, and the reason it takes work to get right is that a naive version would be confidently wrong.
+
+Four rules keep it honest:
+
+- **Complete months only.** The current month is partial. Including it would drag typical spending down and inflate the projection.
+- **Median, not mean.** Spending is right-skewed; one heavy month should not set a year's forecast.
+- **A range, not a point.** The best and worst of the recent months bound the estimate, drawn as a band. A single number implies precision that three months of data cannot support.
+- **Months with no entries are dropped**, not counted as zero spending.
+
+Below three complete months it says so plainly and asks you to treat the figure as a rough shape rather than a number. It also states that this is plain accumulation — any interest or returns on what you invest sit on top and are not modelled, because guessing a rate would be inventing a number.
+
+Alongside: how many months of living costs a year at this pace buys you, and your typical monthly spend with its range.
+
+### What a 10% trim is worth
+
+The actionable half. For each of your largest non-recurring categories, what spending a tenth less would add over a year, plus the total if you did all of them.
+
+Recurring commitments are deliberately excluded. Those are not reduced by deciding differently day to day — they are reduced by cancelling, which the Committed view in Trends already handles.
+
+### Transfers are not spending
+
+A category can now be marked **Transfer, not spending** in More → Manage categories. An RD deposit is money *moved*, not money *gone*.
+
+This matters more than it sounds. Two quantities are easy to conflate:
+
+- **saved** = income not spent. A transfer into an RD counts here — it *is* saving.
+- **left in account** = cash still unallocated. The transfer has left, so it does not.
+
+Savings rate must use the first. I got this wrong in the first cut of this feature and caught it in testing: transfers were being subtracted as spending, so logging a ₹20,000 RD dropped a 70% savings rate to 50% — punishing you for investing. Both figures now appear, correctly and separately, and the rate is identical whether or not you log the investment.
+
+Entries in a transfer category stay visible in the Log but are kept out of every spending analytic. With no category flagged, nothing changes at all.
+
+---
+
+## 4f. Navigation
+
+Bottom nav: **Add · Log · Trends · Money · More**.
+
+Recurring folded into Trends, which forced a decision on tab count. Material Design 3 is explicit: *avoid more than four tabs at once; at five or more the container becomes cramped* — and equally explicit that the obvious workaround is out: *do not include a set of tabbed content within a tab*. Scrollable tabs were the other option, but those are meant for browsing contexts where you don't need to compare labels, which is the opposite of pivoting between analyses.
+
+So Trends consolidated to four rather than growing to seven: **Overview · Categories · Patterns · Committed**. Committed carries everything from the old Recurring tab — forward calendar with a 30/90-day toggle, ranked costs with a month/year toggle, price-change detection, lapsed commitments — plus annualised habit costs, which belong beside recurring costs since both are ongoing commitments in all but name.
+
+---
+
 ## 5. How the categoriser works
 
 No API call, no key, works offline.
@@ -272,6 +349,40 @@ Group entries by a two-token description signature → require **≥3 occurrence
 Output: cadence, mean amount, normalised monthly cost, next expected date, and an **overdue** flag when something's late — which means either you forgot to log it, or the subscription lapsed. The sum of all normalised monthly costs is your fixed baseline: what leaves your account before you decide anything.
 
 Expect roughly two months of data before it's useful.
+
+---
+
+## 6a. Audit
+
+ESLint 9 with correctness and security rules, a 99-assertion property suite, and a static pass for XSS, prototype pollution and uncleaned resources.
+
+### Defects found and fixed
+
+**Comma parsed as a decimal point.** `parseEntry("rs 2,500 fuel")` returned **2.5**, not 2500. The pattern did `.replace(',','.')` for European decimal commas, but Indian formatting uses commas as thousands separators. Sharing a payment SMS reading "Rs 2,500" would have logged ₹2.50 — silent corruption that poisons the median, the variance bridge, recurring amounts and every projection downstream. Commas are now stripped, never reinterpreted.
+
+**`<` emitted raw into SVG.** The transaction-size chart's `<100` bucket label went into `<text>` unescaped, producing `<text><100</text>`. Browsers recover, but it is invalid markup and the first label containing a user-supplied string would have been a real injection. Escaped.
+
+**Maps inheriting from `Object.prototype`.** Eleven maps were keyed by user-supplied strings — descriptions, category ids. A category named `constructor` resolved to a function and rendered as "Object"; assigning to a `__proto__` key is silently ignored, dropping the entry. All eleven now use `Object.create(null)`, verified by rendering every view with entries literally named `__proto__` and `constructor`.
+
+**Pointer capture never released.** The chart scrub called `setPointerCapture` with no matching release.
+
+**`live` shadowed inside `editSheet`.** A local named `live` masked the global `live()` accessor in that closure. Harmless as written, but any later call to `live()` there would have thrown.
+
+**Dead code.** `byMonth()` and `dailySeries()` were orphaned when the hero chart replaced the old trend panels. Removed, along with an unused destructured binding and an unused parameter.
+
+**`detectRecurring()` recomputed seven times per render.** O(n log n) with tokenisation over every entry, called seven times on a single render of Trends or Money. Now memoised against a `DATA_VER` counter that every mutation bumps.
+
+### Reviewed and deliberately not changed
+
+Nine `require-atomic-updates` warnings on `saveExpense`, all false positives. The re-entrancy guard is sound because the check and the set are separated by no `await` — JavaScript cannot interleave another invocation into synchronous code — and the flag is released in a `finally`. Verified empirically by firing three concurrent calls and asserting one row is written. The reasoning is now a comment in the source so the next reader does not have to re-derive it.
+
+### Property suite (99 assertions, all passing)
+
+Quantile and MAD against hand-computed values; `addDays`/`daysBetween` proven inverse across 400 days, month ends, year ends and both leap and non-leap February; Indian lakh grouping; and invariants on generated data — daily totals sum to the month, category totals sum to the month, bridge steps sum to the net change, the concentration curve is monotonic and terminates at exactly 1.0, size buckets reconcile to both total and count, week buckets tile the range with no gaps, cumulative series never decrease, compare series align to equal length across all twenty range × metric combinations, and `pace` excludes the current partial month. Every analytic is also run against empty data and against a single entry.
+
+### Twelve `FUTURE` notes in the source
+
+Marked at the code they concern rather than collected in a list: schema migrations before `SCHEMA_VERSION` moves to 2; encryption at rest; categoriser bigrams and TF-IDF; multi-entry parsing; recurring detection for shifting weekdays and changed cadences; CRDT merge as a prerequisite for two-way sync; calendar export and local notifications; multiple income streams, savings goals and an optional return rate; the periodic-entry logging mode; accessible chart fallbacks; locale support; and an outbox table as the clean shape for a future Postgres replica.
 
 ---
 
