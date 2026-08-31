@@ -116,6 +116,39 @@ input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);backgr
 .erow .m{font-size:11px;color:var(--dim);margin-top:2px;letter-spacing:.04em;text-transform:uppercase;font-weight:600}
 .erow .v{font-family:var(--mono);font-size:15px;font-weight:600;flex:none}
 
+.subnav{position:sticky;top:calc(env(safe-area-inset-top) + 50px);z-index:19;
+  display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 18px 11px;
+  background:rgba(14,15,18,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.subnav button{min-height:38px;border-radius:9px;background:var(--surf);border:1px solid var(--line);
+  font-size:12.5px;font-weight:700;color:var(--mute);letter-spacing:.01em}
+.subnav button.on{background:var(--hotdim);border-color:var(--hot);color:var(--hot2)}
+.headline{margin:16px 18px 4px;padding:15px 16px;border-radius:14px;
+  background:linear-gradient(160deg,#1E2128,#16181D);border:1px solid var(--line2)}
+.headline .hl{font-size:15px;line-height:1.55;color:var(--mute)}
+.headline .hl b{color:var(--ink);font-weight:700}
+.headline .hl b.bad{color:var(--bad)}.headline .hl b.good{color:var(--good)}
+.headline .hlsub{font-size:11.5px;color:var(--dim);margin-top:9px;font-weight:600}
+.subnav.sub3{grid-template-columns:repeat(3,1fr)}
+.duerow.od{border-left:2px solid var(--hot);padding-left:9px;margin-left:-11px}
+.statbig{background:var(--surf);border:1px solid var(--line);border-radius:14px;padding:16px}
+.statbig .v{font-family:var(--mono);font-size:34px;font-weight:600;letter-spacing:-.03em;line-height:1}
+.statbig .d{font-size:12.5px;font-weight:600;margin-top:8px}
+.secnote{font-size:12px;color:var(--mute);line-height:1.5;margin:-4px 0 10px}
+.sec .secnote{margin:0 0 10px}
+.mbar{padding:14px 0 2px}
+.pad14{padding:14px 12px 10px}
+
+/* ---------- hero chart ---------- */
+.hero{padding:14px 0 4px}
+.heroread{padding:0 18px 12px;min-height:62px}
+.heroval{font-size:32px;font-weight:600;letter-spacing:-.025em;line-height:1.1}
+.herosub{font-size:12.5px;color:var(--mute);margin-top:5px}
+.herosub b{font-weight:700}
+#heroChart{touch-action:none;cursor:crosshair;padding:0 2px;user-select:none;-webkit-user-select:none}
+.chip.sm{min-height:38px;font-size:12.5px;padding:0 13px}
+.chip[disabled]{opacity:.4}
+.hero .seg button{min-height:40px;font-size:12.5px;letter-spacing:.04em}
+
 /* ---------- insights ---------- */
 .sec{margin:20px 18px}
 .sec>.lbl{margin-bottom:10px;display:block}
@@ -261,6 +294,10 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
 'use strict';
 /* ══════════════════ 0. UTIL ══════════════════ */
 const $=(s,r=document)=>r.querySelector(s);
+/* Maps keyed by user-supplied strings must not inherit from Object.prototype:
+   a category named "constructor" would otherwise resolve to a function, and
+   assigning to a "__proto__" key is silently ignored, losing the entry. */
+const nullMap=(o)=>Object.assign(Object.create(null),o||{});
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now()+'-'+Math.random().toString(36).slice(2));
 const now=()=>new Date().toISOString();
@@ -297,7 +334,7 @@ const dayLabel=s=>{const d=parseD(s),t=today();
 function toast(msg){const o=$('.toast');if(o)o.remove();
   const e=document.createElement('div');e.className='toast';e.textContent=msg;document.body.appendChild(e);
   setTimeout(()=>e.remove(),1900);}
-function buzz(ms=8){try{navigator.vibrate&&navigator.vibrate(ms)}catch(e){}}
+function buzz(ms=8){try{navigator.vibrate&&navigator.vibrate(ms)}catch{}}
 
 /* NN/g: don't spend confirmation dialogs on routine actions — they get
    click-through fatigue and stop working. Offer recovery instead. Deletes are
@@ -314,7 +351,16 @@ function toastUndo(msg,onUndo){
 /* ══════════════════ 1. STORAGE ══════════════════
    IndexedDB, schema shaped exactly like the SQL you'll port to Postgres/Room.
    Falls back to an in-memory store if IDB is blocked (e.g. sandboxed preview). */
+/* FUTURE — schema migrations. onupgradeneeded currently only creates stores.
+   Before SCHEMA_VERSION goes to 2, add a version-keyed migration ladder there
+   (v1→v2, v2→v3 …) that runs inside the upgrade transaction, and have doImport
+   refuse a backup whose schema is newer than this build rather than importing
+   it half-understood. */
 const SCHEMA_VERSION=1;
+/* FUTURE — this wrapper is deliberately thin. If a Postgres replica happens,
+   the cleanest shape is an outbox table here: every mutation appends an intent
+   row, a sync worker drains it, and failed pushes retry without the UI knowing.
+   That keeps writes local-first and offline-safe by construction. */
 const DB={
   db:null, mem:null,
   async open(){
@@ -373,15 +419,23 @@ const DB={
 const keyOf=s=>s==='rules'?'token':s==='meta'?'k':'id';
 
 /* Durability: ask the browser to never evict us. Granted for installed PWAs. */
+/* FUTURE — encryption at rest. IndexedDB is plaintext on disk; anything with
+   device access can read it. WebCrypto with a passphrase-derived key (PBKDF2 →
+   AES-GCM) would fix that, at the cost of a passphrase prompt on every cold
+   start. Worth it only once income and investment figures live here. */
 async function requestPersist(){
   if(!navigator.storage||!navigator.storage.persist)return null;
   try{
     if(await navigator.storage.persisted())return true;
     return await navigator.storage.persist();
-  }catch(e){return null;}
+  }catch{return null;}
 }
 
 /* ══════════════════ 2. CATEGORIES + AUTO-CATEGORISER ══════════════════ */
+/* FUTURE — categories, seed keywords and currency are all India-first and
+   hardcoded. Locale support means at minimum: currency symbol and grouping
+   from Intl, a swappable keyword pack, and week-start configurable (the
+   calendar heatmap assumes Sunday). */
 const SEED_CATS=[
   ['food','Food & Dining','#C4703C'],   ['groc','Groceries','#7FD1AE'],
   ['fuel','Fuel','#F5B942'],            ['trans','Transport','#6FA8DC'],
@@ -428,6 +482,11 @@ function kwIndex(){
 let RULES=new Map();
 /* Guess = learned rules first (weighted by how often you confirmed them),
    seed keywords second. Returns null when it has no idea. */
+/* FUTURE — the categoriser is a bag-of-words vote. Cheap wins in order:
+   bigrams ("blue diamond" as one token), TF-IDF so common words carry less
+   weight, and a confidence threshold below which it asks rather than guesses.
+   A small on-device embedding model would beat all three but breaks the
+   zero-dependency offline guarantee, so it is not obviously worth it. */
 function guessCategory(desc){
   const toks=tokenize(desc);if(!toks.length)return null;
   const score={};
@@ -462,6 +521,9 @@ const REL_DATE=[
   [/\byesterday\b|\byday\b|\bkal\b/i,-1],[/\btoday\b/i,0],
   [/\bday before\b|\bdbf\b/i,-2],[/\b2 days ago\b/i,-2],[/\b3 days ago\b/i,-3]
 ];
+/* FUTURE — the parser handles one entry per line. Splitting on ";" or "and"
+   would let a whole day be logged in one field ("chai 20; auto 60; lunch 240").
+   Also unhandled: other currencies, and "500 each" style multipliers. */
 function parseEntry(text){
   let s=' '+String(text||'')+' ',date=null;
   for(const [re,off] of REL_DATE)if(re.test(s)){date=addDays(today(),off);s=s.replace(re,' ');break;}
@@ -472,10 +534,15 @@ function parseEntry(text){
     if(c>today())c=(y-1)+'-'+pad2(mo+1)+'-'+pad2(+dm[1]);
     if(/^\d{4}-\d{2}-\d{2}$/.test(c)){date=c;s=s.replace(dm[0],' ');}}
   // amount: prefer a ₹/rs-tagged number, else the last standalone number
-  let amount=null,mAmt=s.match(/(?:₹|\brs\.?\s*)\s*(\d+(?:[.,]\d+)?)\s*(k)?\b/i);
-  if(!mAmt){const all=[...s.matchAll(/(?<![\w.])(\d+(?:\.\d{1,2})?)\s*(k)?(?![\w])/gi)];
+  // Indian grouping: 2,500 and 1,23,456 use commas as THOUSANDS separators.
+  // An earlier version treated the comma as a decimal point, so "rs 2,500"
+  // parsed as ₹2.50 — exactly the kind of silent corruption that poisons every
+  // downstream statistic. Commas are stripped, never reinterpreted.
+  const NUM='\\d+(?:,\\d{2,3})*(?:\\.\\d{1,2})?';
+  let amount=null,mAmt=s.match(new RegExp('(?:₹|\\brs\\.?\\s*)\\s*('+NUM+')\\s*(k)?\\b','i'));
+  if(!mAmt){const all=[...s.matchAll(new RegExp('(?<![\\w.])('+NUM+')\\s*(k)?(?![\\w])','gi'))];
     if(all.length)mAmt=all[all.length-1];}
-  if(mAmt){amount=parseFloat(String(mAmt[1]).replace(',','.'));
+  if(mAmt){amount=parseFloat(String(mAmt[1]).replace(/,/g,''));
     if(mAmt[2])amount*=1000;
     s=s.replace(mAmt[0],' ');}
   const desc=s.replace(/[₹]|\brs\.?\b/gi,' ').replace(/\s+/g,' ').trim();
@@ -484,7 +551,7 @@ function parseEntry(text){
 }
 /* One-tap repeat: your genuinely repeated purchases, most recent first. */
 function frequents(limit=6){
-  const seen={};
+  const seen=nullMap();
   for(const e of live()){
     const k=(e.description||'').toLowerCase().trim();
     if(k.length<3)continue;
@@ -501,11 +568,17 @@ function frequents(limit=6){
    set of changes is silently lost the next time you import. A viewer that
    never writes cannot diverge, so the phone stays the single source of truth. */
 let READONLY=false;
+let DATA_VER=0;                     // bumped on every change to entries or categories
 let EXP=[];                                    // live cache, non-deleted, date-desc
-const live=()=>EXP.filter(e=>!e.deleted_at);
-function byMonth(){
-  const m={};for(const e of live()){(m[monKey(e.spent_on)]??=[]).push(e);}return m;
-}
+/* A category can be marked a transfer — money moved, not money gone (an RD
+   deposit, a savings transfer). Counting those as spending would understate
+   savings twice over: subtracted as an expense AND missing from what's left.
+   So every spending analytic reads live(); only the Log shows liveAll(). With
+   no category flagged, the two are identical and nothing changes. */
+const isTransfer=e=>!!(CATMAP[e.category_id]&&CATMAP[e.category_id].is_transfer);
+const liveAll=()=>EXP.filter(e=>!e.deleted_at);
+const live=()=>EXP.filter(e=>!e.deleted_at&&!isTransfer(e));
+const transfers=()=>EXP.filter(e=>!e.deleted_at&&isTransfer(e));
 function sum(a){return a.reduce((s,e)=>s+e.amount,0);}
 function monthStats(key){
   const rows=live().filter(e=>monKey(e.spent_on)===key);
@@ -514,7 +587,7 @@ function monthStats(key){
   const dim=new Date(y,m,0).getDate();
   const isCur=key===monKey(today());
   const elapsed=isCur?new Date().getDate():dim;
-  const byCat={};for(const e of rows)byCat[e.category_id]=(byCat[e.category_id]||0)+e.amount;
+  const byCat=nullMap();for(const e of rows)byCat[e.category_id]=(byCat[e.category_id]||0)+e.amount;
   const daily=Array(dim).fill(0);for(const e of rows)daily[parseD(e.spent_on).getDate()-1]+=e.amount;
   return{key,rows,total,count:rows.length,dim,elapsed,isCur,byCat,daily,
     perDay:elapsed?total/elapsed:0, projected:isCur&&elapsed?total/elapsed*dim:total};
@@ -527,7 +600,7 @@ function last12(){
   return out;
 }
 function dowPattern(){
-  const s=Array(7).fill(0),c=Array(7).fill(0),seen={};
+  const s=Array(7).fill(0),c=Array(7).fill(0),seen=nullMap();
   for(const e of live()){const d=parseD(e.spent_on).getDay();s[d]+=e.amount;
     if(!seen[e.spent_on]){seen[e.spent_on]=1;c[d]++;}}
   return s.map((v,i)=>c[i]?v/c[i]:0);
@@ -542,9 +615,23 @@ function signature(e){
   if(!t.length)return 'cat:'+e.category_id;
   return t.slice(0,2).sort().join(' ');
 }
+/* Memoised: O(n log n) with tokenisation over every entry, and seven call sites
+   hit it on a single render of Trends or Money. Invalidated by DATA_VER, which
+   every mutation bumps. */
+let _recCache=null,_recVer=-1;
 function detectRecurring(){
+  if(_recCache&&_recVer===DATA_VER)return _recCache;
+  _recCache=_detectRecurring();_recVer=DATA_VER;
+  return _recCache;
+}
+/* FUTURE — detection is median-gap plus amount stability, which is robust and
+   explainable but misses two real cases: charges that shift weekday (last
+   Friday of the month), and cadences that changed partway (monthly → annual
+   billing). Proper seasonal decomposition would catch both. Explainability is
+   worth keeping — a user should be able to see why something was flagged. */
+function _detectRecurring(){
   const cutoff=addDays(today(),-420);
-  const groups={};
+  const groups=nullMap();
   for(const e of live()){if(e.spent_on<cutoff)continue;(groups[signature(e)]??=[]).push(e);}
   const out=[];
   for(const sig in groups){
@@ -556,7 +643,7 @@ function detectRecurring(){
     const med=sorted[Math.floor(sorted.length/2)];
     const hit=CADENCE.find(([d,,tol])=>Math.abs(med-d)<=tol);
     if(!hit)continue;
-    const [ideal,name,tol]=hit;
+    const [,name,tol]=hit;
     const okGaps=gaps.filter(x=>Math.abs(x-med)<=Math.max(tol,med*.35)).length;
     if(okGaps/gaps.length<0.6)continue;
     const amts=g.map(e=>e.amount),mean=amts.reduce((a,b)=>a+b,0)/amts.length;
@@ -566,6 +653,7 @@ function detectRecurring(){
     const last=g[g.length-1].spent_on, next=addDays(last,med);
     const overdue=daysBetween(next,today())>Math.max(3,med*.15);
     out.push({
+      entries:g,
       sig, label:g[g.length-1].description||CATMAP[g[0].category_id].name,
       cat:g[g.length-1].category_id, n:g.length, cadence:name, gap:med,
       mean, min:Math.min(...amts), max:Math.max(...amts), stable:cv<0.08,
@@ -574,6 +662,141 @@ function detectRecurring(){
     });
   }
   return out.sort((a,b)=>b.monthly-a.monthly);
+}
+
+/* ══════════════════ 3a. INCOME ══════════════════
+   Stored as a monthly take-home figure plus optional per-month overrides,
+   because income here is "mostly steady with minor variation" — a single
+   estimate covers the norm, an override covers the month that wasn't.
+   Take-home rather than gross: tax and deductions never reach the account, so
+   including them would flatter the savings rate and make safe-to-spend wrong. */
+let INCOME={monthly:0,period:'month',overrides:{}};
+const incomeFor=k=>{
+  const o=INCOME.overrides&&INCOME.overrides[k];
+  return (o===undefined||o===null)?(INCOME.monthly||0):o;
+};
+const hasIncome=()=>(INCOME.monthly||0)>0||Object.keys(INCOME.overrides||{}).length>0;
+
+async function saveIncome(next){
+  INCOME={...INCOME,...next};
+  await DB.put('meta',{k:'income',v:JSON.stringify(INCOME)});
+}
+
+/* Everything the Money tab needs for one month. */
+/* FUTURE — income is one figure plus overrides. Natural extensions: multiple
+   income streams (salary vs incentive) so variable pay can be tracked
+   separately; a savings goal with a projected hit date; and an optional
+   expected-return rate so projections compound rather than accumulate flat.
+   The rate must be user-supplied — inventing one would be inventing a number. */
+function moneyFor(k){
+  const inc=incomeFor(k);
+  const st=monthStats(k);
+  const fv=fixedVsVariable(k);
+  const tr=transfers().filter(e=>monKey(e.spent_on)===k).reduce((s,e)=>s+e.amount,0);
+  /* Two different quantities, easy to conflate:
+       saved = income not spent — a transfer into an RD counts here, it IS saving
+       left  = cash still unallocated — the transfer has left the account, so it does not
+     Savings rate must use saved. Using left would punish you for investing. */
+  const saved=inc-st.total;
+  const left=inc-st.total-tr;
+  // remaining commitments still expected this month
+  const R=detectRecurring().filter(r=>r.confidence>=45);
+  let stillDue=0;
+  if(st.isCur){
+    const endOfMonth=k+'-'+pad2(st.dim);
+    for(const r of R){
+      let d=r.next,g=0;
+      while(d<=endOfMonth&&g++<10){ if(d>=today())stillDue+=r.mean; d=addDays(d,r.gap); }
+    }
+  }
+  const daysLeft=st.isCur?Math.max(0,st.dim-st.elapsed):0;
+  return{inc,st,fv,transfers:tr,saved,left,stillDue,daysLeft,
+    rate:inc?saved/inc*100:null,
+    committedPct:inc?fv.fixed/inc*100:null,
+    safe:st.isCur?Math.max(0,inc-st.total-tr-stillDue):null,
+    perDayLeft:st.isCur&&daysLeft?Math.max(0,inc-st.total-tr-stillDue)/daysLeft:null};
+}
+/* Forward projection from recent pace.
+   Rules that keep it honest:
+   - complete months only. The current month is partial and would understate spend.
+   - median, not mean. Spending is right-skewed; one heavy month should not set the forecast.
+   - a range, not a point. The best and worst of the recent months bound it, because a
+     single number implies a precision that three months of data does not support.
+   - months with no entries at all are dropped rather than counted as zero spending. */
+function pace(n=3){
+  const d=new Date();d.setDate(1);
+  const keys=[];
+  for(let i=1;i<=n;i++){const t=new Date(d.getFullYear(),d.getMonth()-i,1);
+    keys.push(t.getFullYear()+'-'+pad2(t.getMonth()+1));}
+  const rows=keys.map(k=>{
+    const rs=live().filter(e=>monKey(e.spent_on)===k);
+    return{k,spend:sum(rs),n:rs.length,inc:incomeFor(k)};
+  }).filter(r=>r.n>0);
+  if(!rows.length)return null;
+  const sp=rows.map(r=>r.spend).sort((a,b)=>a-b);
+  const inc=rows.map(r=>r.inc).sort((a,b)=>a-b);
+  const med=quantile(sp,.5), lo=sp[0], hi=sp[sp.length-1];
+  const incMed=quantile(inc,.5)||INCOME.monthly||0;
+  const perMonth=incMed-med;
+  return{months:rows.length, rows, medSpend:med, loSpend:lo, hiSpend:hi, income:incMed,
+    perMonth, perYear:perMonth*12,
+    bestYear:(incMed-lo)*12, worstYear:(incMed-hi)*12,
+    coverMonths:med?(perMonth*12)/med:0,
+    thin:rows.length<3};
+}
+
+/* What trimming a category would be worth over a year. Recurring commitments are
+   excluded — those are not trimmed by deciding, they are trimmed by cancelling,
+   which the Committed view already covers. */
+function levers(n=3,cut=0.10){
+  const d=new Date();d.setDate(1);
+  const keys=[];
+  for(let i=1;i<=n;i++){const t=new Date(d.getFullYear(),d.getMonth()-i,1);
+    keys.push(t.getFullYear()+'-'+pad2(t.getMonth()+1));}
+  const sigs=new Set(detectRecurring().map(r=>r.sig));
+  const tot=nullMap(),seen=new Set();
+  for(const e of live()){
+    if(!keys.includes(monKey(e.spent_on)))continue;
+    seen.add(monKey(e.spent_on));
+    if(sigs.has(signature(e)))continue;
+    tot[e.category_id]=(tot[e.category_id]||0)+e.amount;
+  }
+  const months=Math.max(1,seen.size);
+  return Object.entries(tot).map(([id,v])=>({id,name:CATMAP[id].name,color:CATMAP[id].color,
+    perMonth:v/months, yearly:(v/months)*cut*12})).sort((a,b)=>b.yearly-a.yearly).slice(0,4);
+}
+
+function fanSVG(perMonth,lo,hi){
+  const W=340,H=120,P=8,n=13;
+  const pts=v=>Array.from({length:n},(_,i)=>v*i);
+  const mid=pts(perMonth),a=pts(lo),b=pts(hi);
+  const all=[...mid,...a,...b];
+  const max=Math.max(1,...all),min=Math.min(0,...all);
+  const X=i=>(i/(n-1))*W, Y=v=>P+(H-P*2)*(1-(v-min)/(max-min||1));
+  const path=arr=>arr.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  let s=`<svg viewBox="0 0 ${W} ${H+18}" width="100%" style="display:block" role="img">`;
+  const zero=Y(0);
+  s+=`<path d="${path(b)} ${a.map((v,i)=>'L'+X(n-1-i).toFixed(1)+' '+Y(a[n-1-i]).toFixed(1)).join(' ')} Z"
+      fill="${perMonth>=0?'#6ECFA6':'#FF6B6E'}" opacity=".13"/>`;
+  s+=`<line class="grid" x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" opacity=".8"/>`;
+  s+=`<path d="${path(mid)}" fill="none" stroke="${perMonth>=0?'#6ECFA6':'#FF6B6E'}"
+      stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+  s+=`<text class="axis" x="0" y="${H+14}">now</text>
+      <text class="axis" x="${W}" y="${H+14}" text-anchor="end">12 months</text>`;
+  return s+'</svg>';
+}
+
+function savingsHistory(n=12){
+  const out=[],d=new Date();d.setDate(1);
+  for(let i=n-1;i>=0;i--){
+    const t=new Date(d.getFullYear(),d.getMonth()-i,1);
+    const k=t.getFullYear()+'-'+pad2(t.getMonth()+1);
+    const inc=incomeFor(k);
+    if(!inc){out.push({key:k,rate:null,inc:0,spent:0});continue;}
+    const spent=sum(live().filter(e=>monKey(e.spent_on)===k));   // transfers are not spending
+    out.push({key:k,inc,spent,rate:(inc-spent)/inc*100});
+  }
+  return out;
 }
 
 /* ══════════════════ 3b. DEEP ANALYTICS ══════════════════ */
@@ -597,14 +820,6 @@ function robust(values){
     min:v[0],max:v[n-1]};
 }
 
-/* Daily totals for the last n days, oldest first. Zero-filled: days with no
-   spending are real data, not gaps, and dropping them inflates every average. */
-function dailySeries(n){
-  const out=[],idx={};
-  for(const e of live())idx[e.spent_on]=(idx[e.spent_on]||0)+e.amount;
-  for(let i=n-1;i>=0;i--){const d=addDays(today(),-i);out.push({d,v:idx[d]||0});}
-  return out;
-}
 function rollingMean(arr,w){
   return arr.map((_,i)=>{
     const from=Math.max(0,i-w+1),slice=arr.slice(from,i+1);
@@ -646,7 +861,7 @@ function bridge(curKey,prevKey){
    not unusual, a big coffee is. */
 function unusual(key){
   const rows=live().filter(e=>monKey(e.spent_on)===key);
-  const hist={};
+  const hist=nullMap();
   for(const e of live())(hist[e.category_id]??=[]).push(e.amount);
   const allAmts=live().map(e=>e.amount);
   const global_=robust(allAmts);
@@ -688,10 +903,10 @@ function categorySparks(nMonths=6){
   const keys=[];const d=new Date();d.setDate(1);
   for(let i=nMonths-1;i>=0;i--){const t=new Date(d.getFullYear(),d.getMonth()-i,1);
     keys.push(t.getFullYear()+'-'+pad2(t.getMonth()+1));}
-  const byCat={};
+  const byCat=nullMap();
   for(const e of live()){
     const k=monKey(e.spent_on);if(!keys.includes(k))continue;
-    (byCat[e.category_id]??=Object.fromEntries(keys.map(k=>[k,0])))[k]+=e.amount;
+    (byCat[e.category_id]??=Object.fromEntries(keys.map(kk=>[kk,0])))[k]+=e.amount;
   }
   return Object.entries(byCat).map(([id,m])=>{
     const series=keys.map(k=>m[k]);
@@ -708,17 +923,56 @@ function sizeBuckets(key){
   const B=[[0,100],[100,300],[300,600],[600,1200],[1200,3000],[3000,Infinity]];
   const L=['<100','100-300','300-600','600-1.2k','1.2-3k','3k+'];
   const cnt=B.map(()=>0),val=B.map(()=>0);
-  for(const e of live().filter(e=>monKey(e.spent_on)===key)){
+  for(const e of live().filter(x=>monKey(x.spent_on)===key)){
     const i=B.findIndex(([lo,hi])=>e.amount>=lo&&e.amount<hi);
     if(i>=0){cnt[i]++;val[i]+=e.amount;}
   }
   return{labels:L,cnt,val};
 }
 
+/* Price-change detection. Every serious subscription tracker flags a price rise,
+   because a quiet ₹150/month increase is invisible per charge and ₹1,800 a year
+   in aggregate. Compare the recent occurrences of a recurring item against its
+   earlier ones and report the step, when it happened, and the annual impact. */
+function priceChanges(minPct=8){
+  const out=[];
+  for(const r of detectRecurring()){
+    const g=r.entries;
+    if(!g||g.length<4)continue;
+    const k=Math.max(1,Math.min(2,Math.floor(g.length/3)));
+    const recent=g.slice(-k), earlier=g.slice(0,-k);
+    const rm=recent.reduce((s,e)=>s+e.amount,0)/recent.length;
+    const em=earlier.reduce((s,e)=>s+e.amount,0)/earlier.length;
+    if(!em||!rm)continue;
+    const pct=(rm-em)/em*100;
+    if(Math.abs(pct)<minPct)continue;
+    let changedAt=recent[0].spent_on;
+    for(const e of g)if(Math.abs(e.amount-rm)/rm<0.06){changedAt=e.spent_on;break;}
+    out.push({r,from:em,to:rm,pct,changedAt,yearly:(rm-em)*(365/r.gap)});
+  }
+  return out.sort((a,b)=>Math.abs(b.yearly)-Math.abs(a.yearly));
+}
+
+/* Lapsed commitments. A recurring item that has missed more than a full extra
+   cycle either stopped, or is still being paid and simply is not being logged.
+   Both matter and the app cannot tell them apart, so it asks rather than asserts. */
+function lapsed(){
+  return detectRecurring()
+    .filter(r=>daysBetween(r.next,today())>r.gap*0.5)
+    .map(r=>({r,since:daysBetween(r.last,today()),
+      missed:Math.max(1,Math.floor(daysBetween(r.next,today())/r.gap)+1)}))
+    .sort((a,b)=>b.r.monthly-a.r.monthly);
+}
+
 /* Forward cash flow. Every expense tracker looks backwards; the recurring
    detector already knows what is due and roughly when, which is enough to
    project the committed side of the next month. Only commitments are
    forecastable — discretionary spending is a decision, not a schedule. */
+/* FUTURE — this forward view is the natural source for two things it does not
+   do yet: an .ics calendar export of upcoming commitments, and a local
+   Notification a day before a large one lands. Notifications on Android need
+   the app opened at least once in the window; periodic background sync is
+   unreliable enough that it should not be promised. */
 function upcoming(days=30){
   const R=detectRecurring().filter(r=>r.confidence>=45);
   const end=addDays(today(),days), items=[];
@@ -750,7 +1004,7 @@ function upcoming(days=30){
    from a window long enough to mean something: extrapolating a year from two
    events a week apart produces confident nonsense. */
 function habits(){
-  const g={};
+  const g=nullMap();
   for(const e of live()){
     const k=(e.description||'').toLowerCase().trim();
     if(k.length<3)continue;
@@ -802,6 +1056,140 @@ function loggingGaps(key){
   const upto=st.isCur?new Date().getDate():st.dim;
   let blank=0;for(let i=0;i<upto;i++)if(st.daily[i]===0)blank++;
   return{blank,upto,pct:upto?blank/upto*100:0};
+}
+
+/* ══════════════════ 3c. HERO CHART (range / metric / overlay / scrub) ══════════════════
+   Modelled on stock-chart interaction: the timeframe selector sits directly under
+   the chart rather than in a menu, because switching timeframe is the main thing
+   you do here and any friction kills the exploration. Dragging across the chart
+   moves a crosshair and updates the readout above it, so a value can be read at
+   any point without hover — which does not exist on a phone. */
+const RANGES={'1M':{days:30,bucket:'day'},'3M':{days:90,bucket:'day'},
+  '6M':{days:182,bucket:'week'},'1Y':{days:365,bucket:'week'},'ALL':{days:null,bucket:'month'}};
+const METRICS={spend:'Spend',count:'Entries',avg:'Avg size',cum:'Running total'};
+let HERO=null;                                  // cached for the scrub handler
+
+function bucketSpan(from,to,bucket){
+  const out=[];
+  if(bucket==='day'){
+    for(let d=from;d<=to;d=addDays(d,1))out.push({from:d,to:d,label:dayLabel(d)});
+  }else if(bucket==='week'){
+    let end=to;const tmp=[];
+    while(end>=from){
+      const st=addDays(end,-6);
+      tmp.push({from:st<from?from:st,to:end,label:'week to '+dayLabel(end)});
+      end=addDays(end,-7);
+      if(tmp.length>120)break;
+    }
+    out.push(...tmp.reverse());
+  }else{
+    let y=+from.slice(0,4),m=+from.slice(5,7);const endK=monKey(to);
+    for(let g=0;g<400;g++){
+      const k=y+'-'+pad2(m),dim=new Date(y,m,0).getDate();
+      out.push({from:k+'-01',to:k+'-'+pad2(dim),label:monLabel(k)});
+      if(k===endK)break;
+      if(++m>12){m=1;y++;}
+    }
+  }
+  return out;
+}
+function fillBuckets(buckets){
+  const idx=nullMap();
+  for(const e of live()){(idx[e.spent_on]??={s:0,n:0});idx[e.spent_on].s+=e.amount;idx[e.spent_on].n++;}
+  return buckets.map(b=>{
+    let s=0,n=0;
+    for(let d=b.from;d<=b.to;d=addDays(d,1)){const x=idx[d];if(x){s+=x.s;n+=x.n;}}
+    return{...b,sum:s,count:n};
+  });
+}
+const metricOf=(b,m)=>m==='spend'?b.sum:m==='count'?b.count:m==='avg'?(b.count?b.sum/b.count:0):b.sum;
+
+function heroData(){
+  const all=live();
+  if(!all.length)return null;
+  const cfg=RANGES[S.range]||RANGES['3M'];
+  const first=all.map(e=>e.spent_on).sort()[0];
+  const days=cfg.days===null?Math.max(30,daysBetween(first,today())+1):cfg.days;
+  const start=addDays(today(),-(days-1));
+  const buckets=fillBuckets(bucketSpan(start,today(),cfg.bucket));
+  let vals=buckets.map(b=>metricOf(b,S.metric));
+  if(S.metric==='cum'){let r=0;vals=vals.map(v=>r+=v);}
+
+  // previous equivalent window, same bucketing, for the compare overlay
+  let prev=null;
+  if(S.compare){
+    const pEnd=addDays(start,-1),pStart=addDays(pEnd,-(days-1));
+    const pb=fillBuckets(bucketSpan(pStart,pEnd,cfg.bucket));
+    let pv=pb.map(b=>metricOf(b,S.metric));
+    if(S.metric==='cum'){let r=0;pv=pv.map(v=>r+=v);}
+    // align lengths so the two windows sit on the same x positions
+    while(pv.length>vals.length)pv.shift();
+    while(pv.length&&pv.length<vals.length)pv.unshift(pv[0]);
+    prev=pv;
+  }
+  // trailing mean; meaningless on a running total, which is monotonic by construction
+  const w=cfg.bucket==='day'?7:cfg.bucket==='week'?4:3;
+  const smooth=(S.smooth&&S.metric!=='cum')?rollingMean(vals,w):null;
+
+  const total=buckets.reduce((s,b)=>s+b.sum,0);
+  const count=buckets.reduce((s,b)=>s+b.count,0);
+  return{buckets,vals,prev,smooth,smoothW:w,bucket:cfg.bucket,days,start,total,count,
+    headline:S.metric==='count'?count:S.metric==='avg'?(count?total/count:0):total};
+}
+
+/* FUTURE — charts are SVG with no accessible fallback. A visually-hidden
+   <table> of the same series would make them readable by a screen reader, and
+   is far less work than it sounds since the data is already tabular. Pinch-zoom
+   on a range is the other obvious gap. */
+function heroSVG(H){
+  const W=340,PT=10,PB=6,CH=140;
+  const series=[H.vals,H.prev,H.smooth].filter(Boolean);
+  const max=Math.max(1,...series.flat());
+  const n=H.vals.length;
+  const X=i=>n<2?W/2:(i/(n-1))*W;
+  const Y=v=>PT+(CH-PT-PB)*(1-v/max);
+  const path=a=>a.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  H.xy=H.vals.map((v,i)=>({x:X(i),y:Y(v)}));
+
+  let s=`<svg viewBox="0 0 ${W} ${CH}" width="100%" style="display:block" role="img"
+    aria-label="${esc(METRICS[S.metric])} over ${esc(S.range)}">`;
+  for(let i=0;i<=3;i++){const y=PT+(CH-PT-PB)*i/3;
+    s+=`<line class="grid" x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" opacity=".55"/>`;}
+  if(H.prev)s+=`<path d="${path(H.prev)}" fill="none" stroke="#858C9A" stroke-width="1.6"
+    stroke-dasharray="4 4" opacity=".8" stroke-linejoin="round"/>`;
+  if(H.smooth){
+    s+=`<path d="${path(H.vals)}" fill="none" stroke="#3A404C" stroke-width="1.3" stroke-linejoin="round"/>`;
+    s+=`<path d="${path(H.smooth)} L ${W} ${CH-PB} L 0 ${CH-PB} Z" fill="#FF7A3D" opacity=".11"/>`;
+    s+=`<path d="${path(H.smooth)}" fill="none" stroke="#FF7A3D" stroke-width="2.2"
+      stroke-linecap="round" stroke-linejoin="round"/>`;
+  }else{
+    s+=`<path d="${path(H.vals)} L ${W} ${CH-PB} L 0 ${CH-PB} Z" fill="#FF7A3D" opacity=".13"/>`;
+    s+=`<path d="${path(H.vals)}" fill="none" stroke="#FF7A3D" stroke-width="2.2"
+      stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+  s+=`<g id="xh" opacity="0" pointer-events="none">
+    <line id="xhLine" x1="0" y1="0" x2="0" y2="${CH}" stroke="#EAE7E1" stroke-width="1" opacity=".55"/>
+    <circle id="xhDot" cx="0" cy="0" r="4.5" fill="#FF7A3D" stroke="#0E0F12" stroke-width="2"/></g>`;
+  return s+'</svg>';
+}
+
+function heroReadout(idx){
+  const H=HERO;if(!H)return '';
+  const fmt=v=>S.metric==='count'?money(v)+' '+(v===1?'entry':'entries'):'₹'+money(v);
+  if(idx===null||idx===undefined){
+    const rangeLbl={'1M':'last 30 days','3M':'last 3 months','6M':'last 6 months',
+      '1Y':'last 12 months','ALL':'all time'}[S.range];
+    let sub=`${esc(METRICS[S.metric])} · ${rangeLbl}`;
+    if(H.prev&&H.prev.length){
+      const a=H.prev.reduce((x,y)=>x+y,0),b=H.vals.reduce((x,y)=>x+y,0);
+      if(a>0){const d=(b-a)/a*100;
+        sub+=` · <b class="${d>0?'bad':'good'}">${d>0?'+':''}${d.toFixed(0)}% vs previous</b>`;}
+    }
+    return `<div class="heroval num">${fmt(H.headline)}</div><div class="herosub">${sub}</div>`;
+  }
+  const b=H.buckets[idx],v=H.vals[idx];
+  return `<div class="heroval num">${fmt(v)}</div>
+    <div class="herosub">${esc(b.label)}${b.count?` · ${b.count} ${b.count===1?'entry':'entries'}`:' · nothing logged'}</div>`;
 }
 
 /* ══════════════════ 4b. DEEP CHART RENDERERS ══════════════════ */
@@ -905,7 +1293,7 @@ function histSVG(h){
     const ht=Math.max(v>0?2:0,v/max*H),x=i*(bw+gap);
     s+=`<rect x="${x.toFixed(1)}" y="${(H-ht).toFixed(1)}" width="${bw.toFixed(1)}"
         height="${ht.toFixed(1)}" rx="2" fill="#FF7A3D" opacity="${v?0.85:0.2}"/>`;
-    s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+13}" text-anchor="middle">${h.labels[i]}</text>`;
+    s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+13}" text-anchor="middle">${esc(h.labels[i])}</text>`;
     if(h.cnt[i])s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+25}" text-anchor="middle"
         fill="#858C9A">${h.cnt[i]}×</text>`;
   });
@@ -954,7 +1342,8 @@ function lineChart(series){ // [{data,color,dash}]
 const S={
   view:'add', mode:'quick', quick:'', amount:'', desc:'', date:today(),
   cat:null, catManual:false, dateManual:false,
-  logMonth:monKey(today()), insMonth:monKey(today()), q:'', detail:false, persisted:null, focusQuick:false
+  logMonth:monKey(today()), insMonth:monKey(today()), q:'', tsec:'over', horizon:30, rannual:false, incPeriod:'month', persisted:null, focusQuick:false,
+  range:'3M', metric:'spend', smooth:true, compare:false
 };
 
 /* ══════════════════ 6. VIEWS ══════════════════ */
@@ -1049,9 +1438,9 @@ function fmtAmt(a){
 }
 
 function vLog(){
-  const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
+  const months=[...new Set(liveAll().map(e=>monKey(e.spent_on)))].sort().reverse();
   if(!months.includes(S.logMonth))S.logMonth=months[0]||monKey(today());
-  let rows=live().filter(e=>monKey(e.spent_on)===S.logMonth);
+  let rows=liveAll().filter(e=>monKey(e.spent_on)===S.logMonth);
   if(S.q){const q=S.q.toLowerCase();
     rows=rows.filter(e=>(e.description||'').toLowerCase().includes(q)||CATMAP[e.category_id].name.toLowerCase().includes(q));}
   rows.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
@@ -1074,7 +1463,7 @@ function vLog(){
   <div style="height:24px"></div>`;
 }
 function logList(){
-  let rows=live().filter(e=>monKey(e.spent_on)===S.logMonth);
+  let rows=liveAll().filter(e=>monKey(e.spent_on)===S.logMonth);
   if(S.q){const q=S.q.toLowerCase();
     rows=rows.filter(e=>(e.description||'').toLowerCase().includes(q)||CATMAP[e.category_id].name.toLowerCase().includes(q));}
   rows.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
@@ -1092,116 +1481,136 @@ function logList(){
     </div>`).join('');
 }
 
-function vInsights(){
+/* ══════════════════ TRENDS ══════════════════
+   Four views behind a segmented control rather than one long scroll. Harms et
+   al. (2015) tested four layouts for long content on phones and found plain
+   scrolling performed worst of the four, with tabs, menus and collapsible
+   sections all doing better; NN/g's dashboard work says the same thing from the
+   other side — split a dense view into a summary plus drill-down. Segmented
+   controls are the right control here because these are views of one dataset
+   within a single context, not separate destinations, and four stays under the
+   five-segment limit for a phone.
+
+   Each view carries exactly one period control, which is what makes the split
+   worth doing: Overview is range-based, Where and When are month-based, Habits
+   is all-time. Previously a range selector and a month picker sat on the same
+   screen meaning different things. */
+/* Material Design 3: avoid more than four tabs — at five or more the container
+   becomes cramped — and never nest a set of tabs inside a tab. Absorbing the
+   Recurring tab therefore meant consolidating to four, not adding a fifth. */
+const TSECT=[['over','Overview'],['where','Categories'],['when','Patterns'],['comm','Committed']];
+
+function insCtx(){
   const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
-  if(!live().length)return `<div class="hd"><h1>Trends</h1></div>
-    <div class="empty">Add a week of expenses and this page fills up:<br>month-on-month deltas, category shifts, burn rate.</div>`;
   if(!months.includes(S.insMonth))S.insMonth=months[0];
   const cur=monthStats(S.insMonth);
-  const spentDays=cur.daily.slice(0,cur.elapsed).filter(v=>v>0);
-  const rday=robust(spentDays);
-  const pi=months.indexOf(S.insMonth);
-  const prevKey=months[pi+1];
+  const pi=months.indexOf(S.insMonth), prevKey=months[pi+1];
   const prev=prevKey?monthStats(prevKey):null;
-  const l12=last12();
-  const hiIdx=l12.findIndex(m=>m.key===S.insMonth);
-  const delta=(a,b)=>b?((a-b)/b*100):null;
-  const dTot=prev?delta(cur.total,prev.total):null;
-  const arrow=v=>v>0?'▲':'▼';
-  const dcls=v=>v>0?'bad':'good';
+  const spentDays=cur.daily.slice(0,cur.elapsed).filter(v=>v>0);
+  return{months,cur,prevKey,prev,rday:robust(spentDays),
+    br:prevKey?bridge(S.insMonth,prevKey):null,
+    fv:fixedVsVariable(S.insMonth), gaps:loggingGaps(S.insMonth),
+    conc:concentration(S.insMonth), odd:unusual(S.insMonth),
+    buckets:sizeBuckets(S.insMonth), sparks:categorySparks(6), HB:habits(), dow:dowPattern()};
+}
+const pctD=(a,b)=>b?((a-b)/b*100):null;
+const arrow=v=>v>0?'▲':'▼';
+const dcls=v=>v>0?'bad':'good';
 
-  // category breakdown w/ prior-month delta
-  const cats=Object.entries(cur.byCat).sort((a,b)=>b[1]-a[1]);
-  const maxCat=cats.length?cats[0][1]:1;
+/* Answer first. Tableau's eye-tracking work found big numbers command attention
+   before anything else, so the top of the page states the conclusion in words
+   and one large figure rather than opening with a chart to be interpreted. */
+function headline(c){
+  const {cur,prev,prevKey,br}=c;
+  if(!cur.count)return `<div class="headline"><div class="hl">Nothing logged in ${monLabel(S.insMonth)}.</div></div>`;
+  const d=prev?pctD(cur.total,prev.total):null;
+  let line;
+  if(d===null){
+    line=`<b>₹${money(cur.total)}</b> so far in ${monLabel(S.insMonth)}, across ${cur.count} entries.`;
+  }else{
+    const dir=d>0?'more':'less';
+    line=`<b>₹${money(cur.total)}</b> in ${monLabel(S.insMonth)} — <b class="${dcls(d)}">${Math.abs(d).toFixed(0)}% ${dir}</b> than ${monLabel(prevKey)}.`;
+    if(br&&br.steps.length){
+      const t=br.steps[0];
+      line+=` Mostly <b>${esc(t.name)}</b>, ${t.delta>0?'up':'down'} ₹${money(Math.abs(t.delta))}.`;
+    }
+  }
+  return `<div class="headline"><div class="hl">${line}</div></div>`;
+}
 
-  // cumulative burn: this month vs previous
-  const d90=dailySeries(90).map(x=>x.v);
-  const raw90=d90, roll7=rollingMean(d90,7), roll30=rollingMean(d90,30);
-  const trendDir=roll30[59]?((roll30[89]-roll30[59])/roll30[59]*100):0;
-  const br=prevKey?bridge(S.insMonth,prevKey):null;
-  const fv=fixedVsVariable(S.insMonth);
-  const gaps=loggingGaps(S.insMonth);
-  const sparks=categorySparks(6);
-  const conc=concentration(S.insMonth);
-  const odd=unusual(S.insMonth);
-  const buckets=sizeBuckets(S.insMonth);
-  const HB=habits();
-  const cum=arr=>{let t=0;return arr.map(v=>t+=v);};
-  const curCum=cum(cur.daily.slice(0,cur.elapsed));
-  const prevCum=prev?cum(prev.daily):[];
+function monthBar(c){
+  return `<div class="mbar"><div class="scrollx">
+    ${c.months.slice(0,14).map(m=>`<button class="chip sm ${m===S.insMonth?'on':''}" data-imon="${m}">${monLabel(m)}</button>`).join('')}
+  </div></div>`;
+}
+const secNote=t=>`<div class="secnote">${t}</div>`;
 
-  const dow=dowPattern();
-  const maxDow=Math.max(...dow,1);
-
-  // top descriptions this month
-  const bd={};for(const e of cur.rows){const k=(e.description||CATMAP[e.category_id].name).toLowerCase().trim();
-    bd[k]=(bd[k]||0)+e.amount;}
-  const top=Object.entries(bd).sort((a,b)=>b[1]-a[1]).slice(0,5);
-
+/* ── Overview ── */
+function tOverview(c){
+  const {cur,prev,prevKey,rday}=c;
+  const d=prev?pctD(cur.total,prev.total):null;
   return `
-  <div class="hd"><h1>Trends</h1><div class="sub lbl">${monLabel(S.insMonth)}${cur.isCur?' · in progress':''}
-    <span class="pill" style="margin-left:6px">swipe ↔ months</span></div></div>
-  <div style="padding:12px 0 2px"><div class="scrollx">
-    ${months.slice(0,14).map(m=>`<button class="chip ${m===S.insMonth?'on':''}" data-imon="${m}">${monLabel(m)}</button>`).join('')}
-  </div></div>
+  ${headline(c)}
+  <div id="heroWrap" class="hero">
+    <div id="heroRead" class="heroread" aria-live="polite">${heroReadout(null)}</div>
+    <div id="heroChart">${HERO?heroSVG(HERO):'<div class="empty">No data yet</div>'}</div>
+    <div class="seg" style="margin:12px 0 0;padding:0 18px">
+      ${Object.keys(RANGES).map(r=>`<button data-range="${r}" class="${S.range===r?'on':''}">${r}</button>`).join('')}
+    </div>
+    <div class="scrollx" style="margin-top:8px">
+      ${Object.entries(METRICS).map(([k,l])=>`<button class="chip sm ${S.metric===k?'on':''}" data-metric="${k}">${l}</button>`).join('')}
+    </div>
+    <div class="scrollx" style="margin-top:8px">
+      <button class="chip sm ${S.smooth?'on':''}" data-tog="smooth">${S.smooth?'✓ ':''}Smooth</button>
+      <button class="chip sm ${S.compare?'on':''}" data-tog="compare">${S.compare?'✓ ':''}Compare previous</button>
+    </div>
+    ${secNote('Drag across the chart to read any point.')}
+  </div>
 
   <div class="sec">
-    <div class="kpis">
-      <div class="kpi"><span class="lbl">Spent</span><div class="v">₹${money(cur.total)}</div>
-        <div class="d ${dTot===null?'dimc':dcls(dTot)}">${dTot===null?'no prior month':arrow(dTot)+' '+Math.abs(dTot).toFixed(0)+'% vs '+monLabel(prevKey)}</div></div>
+    <span class="lbl">${monLabel(S.insMonth)}${cur.isCur?' so far':''}</span>
+    <div class="statbig">
+      <div class="v num">₹${money(cur.total)}</div>
+      <div class="d ${d===null?'dimc':dcls(d)}">${d===null?cur.count+' entries':
+        arrow(d)+' '+Math.abs(d).toFixed(0)+'% vs '+monLabel(prevKey)+' · '+cur.count+' entries'}</div>
+    </div>
+    <div class="kpis" style="margin-top:10px">
       <div class="kpi"><span class="lbl">Typical day</span><div class="v">₹${money(rday.median)}</div>
-        <div class="d dimc">median · mean is ₹${money(cur.perDay)}${rday.mean>rday.median*1.15?' (skewed)':''}</div></div>
-      ${cur.isCur?`<div class="kpi"><span class="lbl">Projected</span><div class="v">₹${money(cur.projected)}</div>
-        <div class="d dimc">at current run rate</div></div>`:''}
+        <div class="d dimc">median${rday.mean>rday.median*1.15?', mean ₹'+money(rday.mean):''}</div></div>
+      ${cur.isCur?`<div class="kpi"><span class="lbl">On track for</span><div class="v">₹${money(cur.projected)}</div>
+        <div class="d dimc">at this run rate</div></div>`:
+      `<div class="kpi"><span class="lbl">Per day</span><div class="v">₹${money(cur.perDay)}</div>
+        <div class="d dimc">across ${cur.dim} days</div></div>`}
       <div class="kpi"><span class="lbl">Biggest day</span><div class="v">₹${money(Math.max(...cur.daily,0))}</div>
         <div class="d dimc">${cur.daily.indexOf(Math.max(...cur.daily))+1} ${monLabel(S.insMonth).split(' ')[0]}</div></div>
+      <div class="kpi"><span class="lbl">Committed</span><div class="v">₹${money(c.fv.fixed)}</div>
+        <div class="d dimc">${c.fv.pct.toFixed(0)}% of the month</div></div>
     </div>
   </div>
+  <div style="height:16px"></div>`;
+}
 
-  <div class="sec">
-    <span class="lbl">12-month trend</span>
-    <div class="card" style="padding:14px 12px 8px">${barChart(l12.map(m=>m.total),l12.map(m=>monLabel(m.key).split(" ")[0]),hiIdx,'data-mbar')}</div>
-    <div class="hint" style="margin-left:2px">Tap a bar to jump to that month. Swipe the page sideways to step through months.</div>
-  </div>
-
-  <div class="sec">
-    <span class="lbl">Smoothed trend · last 90 days</span>
-    <div class="card" style="padding:14px 12px 10px">
-      ${lineChart([
-        {data:raw90,color:'#3A404C'},
-        {data:roll7,color:'#858C9A'},
-        {data:roll30,color:'#FF7A3D',fill:true}
-      ])}
-      <div class="legend"><span><i style="background:#FF7A3D"></i>30-day</span>
-        <span><i style="background:#858C9A"></i>7-day</span>
-        <span><i style="background:#3A404C"></i>daily</span></div>
-    </div>
-    <div class="hint">Daily spending is too noisy to read a direction from. The 30-day line is the one to watch — it is currently
-      <b class="${trendDir>2?'bad':trendDir<-2?'good':''}">${trendDir>2?'rising':trendDir<-2?'falling':'flat'}</b>${Math.abs(trendDir)>2?' ('+(trendDir>0?'+':'')+trendDir.toFixed(0)+'% vs 30 days ago)':''}.</div>
-  </div>
-
-  ${prev?`<div class="sec">
-    <span class="lbl">What changed vs ${monLabel(prevKey)}</span>
-    <div class="card" style="padding:14px 12px 8px">${waterfallSVG(br)}</div>
-    <div class="hint">${br.net>0?'Up':'Down'} <b>₹${money(Math.abs(br.net))}</b>.
-      ${br.steps.length?`Biggest driver: <b>${esc(br.steps[0].name)}</b>, ${br.steps[0].delta>0?'up':'down'} ₹${money(Math.abs(br.steps[0].delta))}.`:''}
-      Red bars pushed the total up, green pulled it down.</div>
+/* ── Where ── */
+function tWhere(c){
+  const {cur,prev,br,sparks}=c;
+  const cats=Object.entries(cur.byCat).sort((a,b)=>b[1]-a[1]);
+  const maxCat=cats.length?cats[0][1]:1;
+  const bd=nullMap();for(const e of cur.rows){const k=(e.description||CATMAP[e.category_id].name).toLowerCase().trim();bd[k]=(bd[k]||0)+e.amount;}
+  const top=Object.entries(bd).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  if(!cur.count)return monthBar(c)+'<div class="empty">Nothing logged this month.</div>';
+  return `
+  ${monthBar(c)}
+  ${br?`<div class="sec">
+    <span class="lbl">What moved the total</span>
+    ${secNote('Ordered by impact. Red pushed it up, green pulled it down; small movers are folded into Other.')}
+    <div class="card pad14">${waterfallSVG(br)}</div>
   </div>`:''}
 
-  ${prev?`<div class="sec">
-    <span class="lbl">Cumulative burn vs ${monLabel(prevKey)}</span>
-    <div class="card" style="padding:14px 12px 10px">
-      ${lineChart([{data:prevCum,color:'#858C9A',dash:true},{data:curCum,color:'#FF7A3D',fill:true}])}
-      <div class="legend"><span><i style="background:#FF7A3D"></i>${monLabel(S.insMonth)}</span>
-        <span><i style="background:#858C9A"></i>${monLabel(prevKey)}</span></div>
-    </div></div>`:''}
-
   <div class="sec">
-    <span class="lbl">Where it went</span>
-    <div class="card" style="padding:14px">
+    <span class="lbl">Categories</span>
+    <div class="card pad14">
     ${cats.map(([id,v])=>{
-      const p=prev?(prev.byCat[id]||0):null;
-      const d=p?delta(v,p):null;
+      const p=prev?(prev.byCat[id]||0):null, d=p?pctD(v,p):null;
       return `<div class="bar">
         <div class="top"><span style="display:flex;align-items:center;gap:8px;min-width:0">
           <i class="dot" style="background:${CATMAP[id].color}"></i>
@@ -1213,34 +1622,9 @@ function vInsights(){
     </div>
   </div>
 
-  <div class="sec">
-    <span class="lbl">Committed vs decided</span>
-    <div class="card" style="padding:14px">
-      <div class="split">
-        <div class="splitbar">
-          <div style="width:${fv.pct.toFixed(1)}%;background:#858C9A"></div>
-          <div style="width:${(100-fv.pct).toFixed(1)}%;background:var(--hot)"></div>
-        </div>
-        <div class="splitrow"><span><i class="dot" style="background:#858C9A"></i>Fixed / recurring</span>
-          <span class="num">₹${money(fv.fixed)} · ${fv.pct.toFixed(0)}%</span></div>
-        <div class="splitrow"><span><i class="dot" style="background:var(--hot)"></i>Variable</span>
-          <span class="num">₹${money(fv.variable)} · ${(100-fv.pct).toFixed(0)}%</span></div>
-      </div>
-    </div>
-    <div class="hint">Fixed costs set the floor you cannot move this month. The
-      <b>₹${money(fv.variable)}</b> variable half is the part actually open to a decision — that is where
-      any change has to come from.</div>
-  </div>
-
-  <div class="sec">
-    <span class="lbl">Every day of ${monLabel(S.insMonth)}</span>
-    <div class="card" style="padding:12px 8px 8px">${heatmapSVG(S.insMonth)}</div>
-    <div class="hint">Darker is heavier. <b>Tap any day to add an expense for that date.</b> ${gaps.blank?`<b>${gaps.blank} of ${gaps.upto} days have no entry at all</b> — either genuinely spent nothing, or missed. Every figure on this page is a floor, not a total.`:'Every day this month has at least one entry, so the numbers above are complete.'}</div>
-  </div>
-
-  ${!S.detail?`<button class="more" id="moreBtn">Deep dive: category drift, concentration, outliers ▾</button>`:`
   ${sparks.length?`<div class="sec">
-    <span class="lbl">Category drift · 6 months</span>
+    <span class="lbl">Six-month drift</span>
+    ${secNote('Same scale across every panel, so a category climbing stands out against the others.')}
     <div class="card" style="padding:6px 14px">
     ${sparks.map(sp=>`<div class="sparkrow">
       <div class="sparkmeta"><div class="t">${esc(sp.name)}</div>
@@ -1248,148 +1632,401 @@ function vInsights(){
           ` <span class="${sp.drift>15?'bad':sp.drift<-15?'good':'dimc'}">${sp.drift>0?'+':''}${sp.drift.toFixed(0)}%</span>`}</div></div>
       ${sparkSVG(sp.series,sp.color)}</div>`).join('')}
     </div>
-    <div class="hint">Same shape, same scale, six panels — differences between categories jump out that a single combined chart would bury. The percentage compares this month against that category's own average of the prior five.</div>
   </div>`:''}
 
-  ${HB.length?`<div class="sec">
-    <span class="lbl">What your habits cost per year</span>
+  ${top.length?`<div class="sec"><span class="lbl">Biggest items</span>
     <div class="card" style="padding:4px 14px">
-    ${HB.map(h=>`<div class="duerow">
-      <i class="dot" style="background:${CATMAP[h.cat].color}"></i>
-      <div style="min-width:0;flex:1">
-        <div class="t" style="text-transform:capitalize">${esc(h.label)}</div>
-        <div class="s">${h.n}× at ₹${money(h.avg)} · ₹${money(h.perMonth)}/month</div>
-      </div>
-      <span class="num" style="font-weight:600;flex:none">₹${money(h.perYear)}<span class="dimc" style="font-size:10px">/yr</span></span></div>`).join('')}
-    </div>
-    <div class="hint">Frequency × unit price, annualised from your actual pace. A ₹${money(HB[0].avg)} decision made ${HB[0].n} times reads very differently as a yearly figure. Only items seen 4+ times over at least six weeks appear — anything shorter would be extrapolating from noise.</div>
-  </div>`:''}
-
-  ${conc&&conc.n>4?`<div class="sec">
-    <span class="lbl">Concentration</span>
-    <div class="card" style="padding:14px 12px 8px">${paretoSVG(conc.curve)}</div>
-    <div class="hint">Your biggest <b>${conc.txnsForHalf} ${conc.txnsForHalf===1?'transaction':'transactions'}</b>
-      (${conc.pctForHalf.toFixed(0)}% of ${conc.n}) account for half the month.
-      The top 20% carry <b>${(conc.top20*100).toFixed(0)}%</b>.
-      The dashed diagonal is what perfectly even spending would look like — the further the curve bows above it,
-      the more a few decisions dominate. The "80/20 rule" is quoted far more often than it holds, so this is measured, not assumed.</div>
-  </div>`:''}
-
-  ${odd.length?`<div class="sec">
-    <span class="lbl">Unusual for you</span>
-    <div class="card" style="padding:4px 14px">
-    ${odd.map(u=>`<button class="oddrow" data-edit="${u.e.id}">
-      <div style="min-width:0"><div class="t">${esc(u.e.description||CATMAP[u.e.category_id].name)}</div>
-        <div class="s">${u.mult>=2?u.mult.toFixed(1)+'× the usual':'well above usual'} ₹${money(u.typical)} for ${esc(u.scope)}</div></div>
-      <span class="num" style="font-weight:600;flex:none">₹${money(u.e.amount)}</span></button>`).join('')}
-    </div>
-    <div class="hint">Flagged by median ± 2.5 × median absolute deviation, not mean ± standard deviation — the mean and SD are themselves dragged around by the outliers you are trying to find, so they routinely miss obvious ones.</div>
-  </div>`:''}
-
-  <div class="sec">
-    <span class="lbl">Where the money sits by transaction size</span>
-    <div class="card" style="padding:14px 12px 8px">${histSVG(buckets)}</div>
-    <div class="hint">Bar height is total rupees, the count below is how many transactions. Tall bar with a small count means a few big decisions; short bars with big counts mean it leaks out in small pieces.</div>
-  </div>
-
-  <div class="sec">
-    <span class="lbl">Spread of daily spend</span>
-    <div class="card" style="padding:14px">
-      <div class="statgrid">
-        <div><span class="lbl">Median</span><div class="v num">₹${money(rday.median)}</div></div>
-        <div><span class="lbl">Mean</span><div class="v num">₹${money(rday.mean)}</div></div>
-        <div><span class="lbl">Quiet day (25th)</span><div class="v num">₹${money(rday.q1)}</div></div>
-        <div><span class="lbl">Heavy day (75th)</span><div class="v num">₹${money(rday.q3)}</div></div>
-      </div>
-    </div>
-    <div class="hint">${rday.mean>rday.median*1.15
-      ?`Mean sits <b>${((rday.mean/rday.median-1)*100).toFixed(0)}% above</b> the median, so a handful of large days are pulling the average up. The median is the better description of a normal day for you.`
-      :'Mean and median are close, so your daily spending is fairly even — no small group of days is distorting the average.'}
-      Half your active days land between ₹${money(rday.q1)} and ₹${money(rday.q3)}.</div>
-  </div>
-
-  <div class="sec">
-    <span class="lbl">Average by weekday (all time)</span>
-    <div class="card" style="padding:14px 12px 8px">${barChart(dow,DOW.map(d=>d[0]+d[1]),dow.indexOf(Math.max(...dow)))}</div>
-  </div>
-
-  ${top.length?`<div class="sec"><span class="lbl">Top items this month</span>
-    <div class="card" style="padding:4px 14px">
-    ${top.map(([k,v])=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:13.5px">
-      <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize">${esc(k)}</span>
+    ${top.map(([k,v])=>`<div class="duerow"><div style="min-width:0;flex:1">
+      <div class="t" style="text-transform:capitalize">${esc(k)}</div></div>
       <span class="num" style="font-weight:600;flex:none">₹${money(v)}</span></div>`).join('')}
     </div></div>`:''}
-  <button class="more" id="lessBtn">Hide extra detail ▴</button>`}
-  <div style="height:20px"></div>`;
+  <div style="height:16px"></div>`;
 }
 
-function vRecurring(){
-  const R=detectRecurring();
-  const U=upcoming(30);
-  const fixed=R.reduce((s,r)=>s+r.monthly,0);
-  const due=R.filter(r=>r.overdue);
+/* ── When ── */
+function tWhen(c){
+  const {cur,prev,prevKey,gaps,dow}=c;
+  if(!cur.count)return monthBar(c)+'<div class="empty">Nothing logged this month.</div>';
+  const cum=a=>{let t=0;return a.map(v=>t+=v);};
   return `
-  <div class="hd"><h1>Recurring</h1>
-    <div class="sub lbl">${R.length} detected · ~₹${money(fixed)}/month committed</div></div>
-  ${U.items.length?`
-    <div class="sec">
-      <span class="lbl">Committed over the next 30 days</span>
-      <div class="kpis" style="margin-top:8px">
-        <div class="kpi"><span class="lbl">Already owed</span><div class="v">₹${money(U.committed)}</div>
-          <div class="d dimc">${U.items.length} payment${U.items.length===1?'':'s'} due</div></div>
-        <div class="kpi"><span class="lbl">Plus variable</span><div class="v">₹${money(U.varEstimate)}</div>
-          <div class="d dimc">at ₹${money(U.varPerDay)}/day recently</div></div>
-      </div>
-      <div class="card" style="padding:14px 12px 10px;margin-top:10px">
-        ${lineChart([{data:U.cum,color:'#FF7A3D',fill:true}])}
-        <div class="legend"><span>Commitments accumulating to ${dayLabel(U.end)}</span></div>
-      </div>
-      <div class="hint">This is the part of next month already decided. Discretionary spending is a choice each day, so it is estimated separately rather than forecast.</div>
-    </div>
+  ${monthBar(c)}
+  <div class="sec">
+    <span class="lbl">Every day of ${monLabel(S.insMonth)}</span>
+    ${secNote('Darker is heavier. Tap any day to add an expense for that date.')}
+    <div class="card" style="padding:12px 8px 8px">${heatmapSVG(S.insMonth)}</div>
+    ${gaps.blank?`<div class="hint" style="padding:0 18px"><b>${gaps.blank} of ${gaps.upto} days have no entry.</b> Either you spent nothing, or missed logging — so every figure here is a floor, not a total.</div>`:
+      `<div class="hint" style="padding:0 18px">Every day has an entry, so this month's figures are complete.</div>`}
+  </div>
 
-    <div class="sec">
-      <span class="lbl">What is due, and when</span>
-      <div class="card" style="padding:4px 14px">
-      ${U.items.slice(0,14).map(x=>`<div class="duerow">
-        <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
-        <div style="min-width:0;flex:1">
-          <div class="t">${esc(x.r.label)}</div>
-          <div class="s">${x.overdue?'<b class="hot">overdue — expected '+dayLabel(x.date)+'</b>':dayLabel(x.date)} · ${x.r.cadence.toLowerCase()}</div>
-        </div>
-        <span class="num" style="font-weight:600;flex:none">₹${money(x.r.mean)}</span></div>`).join('')}
-      </div>
-      ${U.items.length>14?`<div class="hint">${U.items.length-14} more beyond this.</div>`:''}
-    </div>
-  `:''}
+  ${prev?`<div class="sec">
+    <span class="lbl">Pace vs ${monLabel(prevKey)}</span>
+    ${secNote('Cumulative spend day by day. If the solid line sits above the dashed one, you are ahead of last month.')}
+    <div class="card pad14">
+      ${lineChart([{data:cum(prev.daily),color:'#858C9A',dash:true},
+                   {data:cum(cur.daily.slice(0,cur.elapsed)),color:'#FF7A3D',fill:true}])}
+      <div class="legend"><span><i style="background:#FF7A3D"></i>${monLabel(S.insMonth)}</span>
+        <span><i style="background:#858C9A"></i>${monLabel(prevKey)}</span></div>
+    </div></div>`:''}
 
-  ${R.length?`
-    ${due.length?`<div class="banner">${due.length} ${due.length===1?'item is':'items are'} past their expected date — either you missed logging ${due.length===1?'it':'them'}, or ${due.length===1?'it':'they'} stopped.</div>`:''}
-    <div class="sec">
-      <span class="lbl">Fixed monthly baseline</span>
-      <div class="kpi" style="margin-top:8px"><div class="v" style="font-size:26px">₹${money(fixed)}</div>
-        <div class="d dimc">this much leaves your account every month before you decide anything</div></div>
+  <div class="sec">
+    <span class="lbl">By weekday, all time</span>
+    <div class="card pad14">${barChart(dow,DOW.map(d=>d[0]+d[1]),dow.indexOf(Math.max(...dow)))}</div>
+  </div>
+
+  <div class="sec">
+    <span class="lbl">Transaction sizes</span>
+    ${secNote('Bar height is total rupees; the count below is how many transactions.')}
+    <div class="card pad14">${histSVG(c.buckets)}</div>
+  </div>
+
+  ${c.conc&&c.conc.n>4?`<div class="sec">
+    <span class="lbl">Concentration</span>
+    <div class="card pad14">${paretoSVG(c.conc.curve)}</div>
+    <div class="hint" style="padding:0 18px">Your biggest <b>${c.conc.txnsForHalf}</b> of ${c.conc.n} transactions carry half the month; the top 20% carry <b>${(c.conc.top20*100).toFixed(0)}%</b>. The dashed diagonal is perfectly even spending.</div>
+  </div>`:''}
+
+  <div class="sec">
+    <span class="lbl">Spread of a day</span>
+    <div class="card pad14">
+      <div class="statgrid">
+        <div><span class="lbl">Median</span><div class="v num">₹${money(c.rday.median)}</div></div>
+        <div><span class="lbl">Mean</span><div class="v num">₹${money(c.rday.mean)}</div></div>
+        <div><span class="lbl">Quiet day</span><div class="v num">₹${money(c.rday.q1)}</div></div>
+        <div><span class="lbl">Heavy day</span><div class="v num">₹${money(c.rday.q3)}</div></div>
+      </div>
     </div>
-    <div class="sec"><span class="lbl">Detected patterns</span>
-    ${R.map(r=>`<div class="rec ${r.overdue?'due':''}" style="margin-top:10px">
-      <div class="h">
-        <span class="n"><i class="dot" style="background:${CATMAP[r.cat].color};display:inline-block;margin-right:7px"></i>${esc(r.label)}</span>
-        <span class="num" style="font-weight:600;flex:none">₹${money(r.mean)}</span>
-      </div>
-      <div class="meta">
-        <span>${r.cadence}</span>
-        <span>${r.n}× seen</span>
-        <span>${r.stable?'fixed amount':'₹'+money(r.min)+'–'+money(r.max)}</span>
-        <span>~₹${money(r.monthly)}/mo</span>
-        <span>${r.confidence}% conf</span>
-      </div>
-      <div class="meta" style="margin-top:7px">
-        <span style="background:none;border:none;padding:0">Last ${dayLabel(r.last)} · ${r.overdue?`<b class="hot">expected ${dayLabel(r.next)}</b>`:`next ~${dayLabel(r.next)}`}</span>
-      </div>
-    </div>`).join('')}
-    </div>`
-  :`<div class="empty">Nothing recurring yet.<br><br>Detection needs <b>3 or more</b> entries with a similar description and a steady gap between them. Keep logging — subscriptions, rent and fuel usually surface within two months.</div>`}
-  <div style="height:20px"></div>`;
+    <div class="hint" style="padding:0 18px">${c.rday.mean>c.rday.median*1.15
+      ?`Mean sits <b>${((c.rday.mean/c.rday.median-1)*100).toFixed(0)}% above</b> the median — a few large days pull the average up.`
+      :'Mean and median are close, so no small group of days distorts the average.'}</div>
+  </div>
+  <div style="height:16px"></div>`;
 }
+
+/* ── Committed: the former Recurring tab, folded in ── */
+function tCommitted(c){
+  const R=detectRecurring();
+  if(!R.length)return `<div class="empty">Nothing recurring detected yet.<br><br>
+    Detection needs <b>3 or more</b> entries with a similar description and a steady gap.
+    Subscriptions, rent and fuel usually surface within two months.</div>`;
+  const monthly=R.reduce((s,r)=>s+r.monthly,0);
+  const U=upcoming(S.horizon), pc=priceChanges(), lp=lapsed();
+  const byMonth=nullMap();for(const x of U.items)(byMonth[monKey(x.date)]??=[]).push(x);
+  const sorted=R.slice().sort((a,b)=>b.monthly-a.monthly);
+  const max=sorted[0].monthly||1;
+  return `
+  <div class="sec" style="margin-top:14px">
+    <div class="statbig">
+      <div class="v num">₹${money(monthly*12)}</div>
+      <div class="d dimc">committed per year · ₹${money(monthly)} a month across ${R.length} commitment${R.length===1?'':'s'}</div>
+    </div>
+  </div>
+
+  <div class="seg" style="margin:14px 0 0;padding:0 18px">
+    ${[30,90].map(d=>`<button data-hz="${d}" class="${S.horizon===d?'on':''}">Next ${d} days</button>`).join('')}
+  </div>
+  ${secNote('A rolling forward view, so an annual renewal is visible weeks ahead rather than arriving as a surprise.')}
+  <div class="sec">
+    <div class="kpis">
+      <div class="kpi"><span class="lbl">Already owed</span><div class="v">₹${money(U.committed)}</div>
+        <div class="d dimc">${U.items.length} payment${U.items.length===1?'':'s'}</div></div>
+      <div class="kpi"><span class="lbl">Plus variable</span><div class="v">₹${money(U.varEstimate)}</div>
+        <div class="d dimc">at ₹${money(U.varPerDay)}/day recently</div></div>
+    </div>
+    <div class="card pad14" style="margin-top:10px">${lineChart([{data:U.cum,color:'#FF7A3D',fill:true}])}
+      <div class="legend"><span>Today → ${dayLabel(U.end)}</span></div></div>
+  </div>
+
+  ${Object.keys(byMonth).sort().map(k=>`<div class="sec">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <span class="lbl">Due in ${monLabel(k)}</span>
+      <span class="num dimc" style="font-size:12.5px">₹${money(byMonth[k].reduce((s,x)=>s+x.r.mean,0))}</span></div>
+    <div class="card" style="padding:4px 14px">
+    ${byMonth[k].map(x=>`<div class="duerow ${x.overdue?'od':''}">
+      <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
+      <div style="min-width:0;flex:1"><div class="t">${esc(x.r.label)}</div>
+        <div class="s">${x.overdue?'<b class="hot">overdue · expected '+dayLabel(x.date)+'</b>':dayLabel(x.date)} · ${x.r.cadence.toLowerCase()}</div></div>
+      <span class="num" style="font-weight:600;flex:none">₹${money(x.r.mean)}</span></div>`).join('')}
+    </div></div>`).join('')}
+
+  <div class="sec">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span class="lbl">What each costs</span>
+      <div style="display:flex;gap:6px">
+        <button class="chip sm ${!S.rannual?'on':''}" data-ann="0">Month</button>
+        <button class="chip sm ${S.rannual?'on':''}" data-ann="1">Year</button></div>
+    </div>
+    <div class="card pad14">
+    ${sorted.map(r=>`<div class="bar">
+      <div class="top"><span style="display:flex;align-items:center;gap:8px;min-width:0">
+        <i class="dot" style="background:${CATMAP[r.cat].color}"></i>
+        <b style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize">${esc(r.label)}</b></span>
+        <span class="num" style="flex:none">₹${money(S.rannual?r.monthly*12:r.monthly)}</span></div>
+      <div class="track"><div class="fill" style="width:${(r.monthly/max*100).toFixed(1)}%;background:${CATMAP[r.cat].color}"></div></div>
+      <div style="font-size:11px;margin-top:4px" class="dimc">${r.cadence} · ₹${money(r.mean)} each · ${r.stable?'fixed':'₹'+money(r.min)+'–'+money(r.max)} · ${r.confidence}% confidence</div>
+    </div>`).join('')}
+    </div>
+  </div>
+
+  ${pc.length?`<div class="sec">
+    <span class="lbl">Price changes</span>
+    <div class="card" style="padding:4px 14px">
+    ${pc.map(x=>`<div class="duerow">
+      <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
+      <div style="min-width:0;flex:1"><div class="t" style="text-transform:capitalize">${esc(x.r.label)}</div>
+        <div class="s">₹${money(x.from)} → ₹${money(x.to)} from ${dayLabel(x.changedAt)}</div></div>
+      <div style="text-align:right;flex:none">
+        <div class="num" style="font-weight:600"><span class="${x.pct>0?'bad':'good'}">${x.pct>0?'+':''}${x.pct.toFixed(0)}%</span></div>
+        <div class="s num">${x.yearly>0?'+':'−'}₹${money(Math.abs(x.yearly))}/yr</div></div></div>`).join('')}
+    </div>
+    <div class="hint" style="padding:0 18px">A rise of a few hundred rupees a charge is easy to miss and adds up over a year.</div>
+  </div>`:''}
+
+  ${lp.length?`<div class="sec">
+    <span class="lbl">Stopped, or not logged?</span>
+    <div class="card" style="padding:4px 14px">
+    ${lp.map(x=>`<div class="duerow">
+      <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
+      <div style="min-width:0;flex:1"><div class="t" style="text-transform:capitalize">${esc(x.r.label)}</div>
+        <div class="s">last seen ${dayLabel(x.r.last)} · ${x.missed} cycle${x.missed===1?'':'s'} missed</div></div>
+      <span class="num" style="font-weight:600;flex:none">₹${money(x.r.monthly)}<span class="dimc" style="font-size:10px">/mo</span></span></div>`).join('')}
+    </div>
+    <div class="hint" style="padding:0 18px">The app cannot tell a cancelled service from one you stopped logging, so it asks rather than assumes. If these stopped, that is <b>₹${money(lp.reduce((s,x)=>s+x.r.monthly*12,0))} a year</b> no longer going out.</div>
+  </div>`:''}
+
+  ${c.HB.length?`<div class="sec">
+    <span class="lbl">What your habits cost a year</span>
+    ${secNote('Not detected as recurring, but repeated often enough to behave like it.')}
+    <div class="card" style="padding:4px 14px">
+    ${c.HB.map(h=>`<div class="duerow">
+      <i class="dot" style="background:${CATMAP[h.cat].color}"></i>
+      <div style="min-width:0;flex:1"><div class="t" style="text-transform:capitalize">${esc(h.label)}</div>
+        <div class="s">${h.n}× at ₹${money(h.avg)} · ₹${money(h.perMonth)}/month</div></div>
+      <span class="num" style="font-weight:600;flex:none">₹${money(h.perYear)}<span class="dimc" style="font-size:10px">/yr</span></span></div>`).join('')}
+    </div></div>`:''}
+  <div style="height:16px"></div>`;
+}
+
+function vInsights(){
+  HERO=heroData();
+  if(!live().length)return `<div class="hd"><h1>Trends</h1></div>
+    <div class="empty">Log a week of expenses and this fills up:<br>month-on-month shifts, category drift, spending patterns.</div>`;
+  const c=insCtx();
+  const body={over:tOverview,where:tWhere,when:tWhen,comm:tCommitted}[S.tsec]||tOverview;
+  return `
+  <div class="hd"><h1>Trends</h1></div>
+  <div class="subnav" role="tablist">
+    ${TSECT.map(([k,l])=>`<button role="tab" aria-selected="${S.tsec===k}"
+      class="${S.tsec===k?'on':''}" data-tsec="${k}">${l}</button>`).join('')}
+  </div>
+  ${body(c)}`;
+}
+
+/* ══════════════════ MONEY ══════════════════
+   Income turns absolute figures into ratios, which is where the meaning is:
+   ₹58,000 spent means nothing on its own, ₹58,000 against ₹80,000 earned means
+   a 27% savings rate. */
+function incomeSheet(){
+  const yearly=S.incPeriod==='year';
+  const shown=yearly?(INCOME.monthly*12):INCOME.monthly;
+  const k=S.insMonth||monKey(today());
+  const ov=INCOME.overrides&&INCOME.overrides[k];
+  const v=openSheet(`<h3>Your income</h3>
+    <div class="pad">
+      <div class="seg" style="padding:0;margin-bottom:12px">
+        <button data-ip="month" class="${!yearly?'on':''}">Per month</button>
+        <button data-ip="year" class="${yearly?'on':''}">Per year</button>
+      </div>
+      <label class="lbl" for="incAmt">Take-home ${yearly?'per year':'per month'}</label>
+      <input id="incAmt" class="quickin" type="number" inputmode="decimal" min="0"
+        value="${shown?Math.round(shown):''}" placeholder="what actually reaches your account">
+      <div class="hint">Take-home, not gross — tax and deductions never land in your account, so counting them would flatter every ratio here.</div>
+      <div style="height:18px"></div>
+      <label class="lbl" for="incOv">Override for ${monLabel(k)} only</label>
+      <input id="incOv" class="quickin" type="number" inputmode="decimal" min="0"
+        value="${ov!==undefined&&ov!==null?Math.round(ov):''}" placeholder="leave blank to use the usual figure">
+      <div class="hint">For a month with an incentive, a bonus, or a gap.</div>
+    </div>
+    <div class="act"><button class="prim" id="incSave">Save</button></div>
+    ${hasIncome()?`<div class="act" style="margin-top:18px"><button class="del" id="incClear">Remove income</button></div>`:''}`);
+  v.querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>{
+    S.incPeriod=b.dataset.ip;closeSheet();incomeSheet();});
+  $('#incSave',v).onclick=async()=>{
+    const raw=parseFloat($('#incAmt',v).value)||0;
+    const monthly=yearly?raw/12:raw;
+    const ovRaw=$('#incOv',v).value.trim();
+    const overrides={...(INCOME.overrides||{})};
+    if(ovRaw===''){delete overrides[k];}
+    else{const n=parseFloat(ovRaw);if(n>0)overrides[k]=n;}
+    try{ await saveIncome({monthly,period:S.incPeriod,overrides}); }
+    catch(err){ console.error(err); return toast('Could not save'); }
+    closeSheet();render();toast('Income saved');
+  };
+  const cl=$('#incClear',v);
+  if(cl)cl.onclick=async()=>{
+    try{ await saveIncome({monthly:0,overrides:{}}); }
+    catch(err){ console.error(err); return toast('Could not save'); }
+    closeSheet();render();toast('Income removed');
+  };
+}
+
+function rateBar(rates){
+  const W=340,H=96,n=rates.length,gap=4,bw=(W-gap*(n-1))/n;
+  const vals=rates.map(r=>r.rate).filter(v=>v!==null);
+  const lo=Math.min(0,...vals),hi=Math.max(10,...vals);
+  const Y=v=>H-((v-lo)/(hi-lo))*H;
+  let s=`<svg viewBox="0 0 ${W} ${H+20}" width="100%" style="display:block" role="img">`;
+  const zero=Y(0);
+  s+=`<line class="grid" x1="0" y1="${zero.toFixed(1)}" x2="${W}" y2="${zero.toFixed(1)}" opacity=".8"/>`;
+  rates.forEach((r,i)=>{
+    const x=i*(bw+gap);
+    if(r.rate===null){
+      s+=`<rect x="${x.toFixed(1)}" y="${(zero-2).toFixed(1)}" width="${bw.toFixed(1)}" height="2" fill="#2C313B"/>`;
+    }else{
+      const y=Y(r.rate),top=Math.min(y,zero),h=Math.max(2,Math.abs(y-zero));
+      s+=`<rect x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}"
+        rx="2" fill="${r.rate>=0?'#6ECFA6':'#FF6B6E'}"/>`;
+    }
+    if(i%2===0||i===n-1)s+=`<text class="axis" x="${(x+bw/2).toFixed(1)}" y="${H+14}"
+      text-anchor="middle">${monLabel(r.key).split(' ')[0]}</text>`;
+  });
+  return s+'</svg>';
+}
+
+/* FUTURE — a second logging mode for periodic entries (investments, EMIs,
+   premiums) that are recorded monthly rather than daily. The is_transfer flag
+   is the foundation; what is missing is a separate entry surface so those do
+   not clutter the daily flow. Pulling holdings from KFin/CAMS is a long way
+   past that: account-aggregator licensing, not an API key. */
+function vMoney(){
+  if(!hasIncome())return `
+    <div class="hd"><h1>Money</h1></div>
+    <div class="sec" style="margin-top:28px">
+      <div class="statbig" style="text-align:center;padding:28px 20px">
+        <div style="font-size:15px;color:var(--mute);line-height:1.6">
+          Add your take-home income and every figure in this app gains a denominator —
+          savings rate, what share your commitments take, and what is genuinely free to spend.
+        </div>
+        <button class="save" id="incBtn" style="margin:20px 0 0;width:100%">Set your income</button>
+      </div>
+    </div>
+    <div class="hint" style="padding:0 18px;margin-top:14px">Stored on this device only, like everything else here. It never leaves the phone.</div>`;
+
+  const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
+  if(!months.includes(S.insMonth))S.insMonth=months[0]||monKey(today());
+  const k=S.insMonth;
+  const m=moneyFor(k);
+  const hist=savingsHistory(12);
+  const withRate=hist.filter(h=>h.rate!==null);
+  const avgRate=withRate.length?withRate.reduce((s,h)=>s+h.rate,0)/withRate.length:null;
+  const kept=m.saved;
+  const pctOf=v=>m.inc?v/m.inc*100:0;
+  const cats=Object.entries(m.st.byCat).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const P=pace(3), LV=levers(3);
+
+  return `
+  <div class="hd"><h1>Money</h1></div>
+  <div class="headline">
+    <div class="hl">${kept>=0
+      ?`You kept <b class="good">${m.rate.toFixed(0)}%</b> of what you earned in ${monLabel(k)} — <b>₹${money(kept)}</b> of ₹${money(m.inc)} not spent.`
+      :`You spent <b class="bad">₹${money(-kept)} more</b> than you earned in ${monLabel(k)}.`}</div>
+    <div class="hlsub">${avgRate!==null?`${avgRate.toFixed(0)}% average across ${withRate.length} month${withRate.length===1?'':'s'}`:'first month with income set'}${m.transfers?` · ₹${money(m.transfers)} moved to savings`:''}</div>
+  </div>
+
+  <div class="mbar"><div class="scrollx">
+    ${months.slice(0,14).map(x=>`<button class="chip sm ${x===S.insMonth?'on':''}" data-imon="${x}">${monLabel(x)}</button>`).join('')}
+    <button class="chip sm" id="incBtn">Edit income</button>
+  </div></div>
+
+  ${m.st.isCur?`<div class="sec">
+    <div class="statbig">
+      <div class="v num">₹${money(m.safe)}</div>
+      <div class="d dimc">free to spend over the remaining ${m.daysLeft} day${m.daysLeft===1?'':'s'}${m.stillDue?` · ₹${money(m.stillDue)} of commitments still to land`:''}</div>
+    </div>
+    ${m.perDayLeft!==null?`<div class="hint" style="padding:0 18px">That is <b>₹${money(m.perDayLeft)} a day</b> if you spread it evenly. Income already committed to recurring payments is set aside first, so this is what is genuinely uncommitted.</div>`:''}
+  </div>`:''}
+
+  <div class="sec">
+    <span class="lbl">Where ${monLabel(k)}'s income went</span>
+    <div class="card pad14">
+      <div class="split">
+        <div class="splitbar">
+          <div style="width:${Math.max(0,pctOf(m.fv.fixed)).toFixed(1)}%;background:#858C9A"></div>
+          <div style="width:${Math.max(0,pctOf(m.fv.variable)).toFixed(1)}%;background:var(--hot)"></div>
+          ${m.transfers?`<div style="width:${Math.max(0,pctOf(m.transfers)).toFixed(1)}%;background:#8A7BF0"></div>`:''}
+          <div style="width:${Math.max(0,pctOf(Math.max(0,m.left))).toFixed(1)}%;background:#6ECFA6"></div>
+        </div>
+        <div class="splitrow"><span><i class="dot" style="background:#858C9A"></i>Committed</span>
+          <span class="num">₹${money(m.fv.fixed)} · ${pctOf(m.fv.fixed).toFixed(0)}%</span></div>
+        <div class="splitrow"><span><i class="dot" style="background:var(--hot)"></i>Variable</span>
+          <span class="num">₹${money(m.fv.variable)} · ${pctOf(m.fv.variable).toFixed(0)}%</span></div>
+        ${m.transfers?`<div class="splitrow"><span><i class="dot" style="background:#8A7BF0"></i>Saved / moved</span>
+          <span class="num">₹${money(m.transfers)} · ${pctOf(m.transfers).toFixed(0)}%</span></div>`:''}
+        <div class="splitrow"><span><i class="dot" style="background:#6ECFA6"></i>Left in account</span>
+          <span class="num ${m.left<0?'bad':''}">₹${money(m.left)} · ${pctOf(m.left).toFixed(0)}%</span></div>
+      </div>
+    </div>
+    <div class="hint" style="padding:0 18px">Commitments take <b>${m.committedPct.toFixed(0)}%</b> of your income before any decision is made.${
+      m.transfers?'':' Money you move into savings would appear separately here once you mark that category as a transfer in More → Manage categories.'}</div>
+  </div>
+
+  ${P?`<div class="sec">
+    <span class="lbl">At this pace</span>
+    ${secNote(`Based on the median of your last ${P.months} complete month${P.months===1?'':'s'} — the current month is partial, so it is left out.`)}
+    <div class="statbig">
+      <div class="v num ${P.perYear<0?'bad':'good'}">${P.perYear<0?'−':''}₹${money(Math.abs(P.perYear))}</div>
+      <div class="d dimc">${P.perYear>=0?'saved over a year':'short over a year'} · ₹${money(Math.abs(P.perMonth))} a month
+        on ₹${money(P.medSpend)} typical spending</div>
+    </div>
+    <div class="card pad14" style="margin-top:10px">${fanSVG(P.perMonth,P.perYear/12>0?P.worstYear/12:P.bestYear/12,P.perYear/12>0?P.bestYear/12:P.worstYear/12)}
+      <div class="legend"><span>Accumulating at this pace · shaded band is your best and worst recent month</span></div></div>
+    <div class="hint" style="padding:0 18px">
+      Depending on which recent month turns out typical, a year lands between
+      <b>₹${money(Math.min(P.bestYear,P.worstYear))}</b> and <b>₹${money(Math.max(P.bestYear,P.worstYear))}</b>.
+      ${P.thin?`<b class="hot">Only ${P.months} complete month${P.months===1?'':'s'} of data</b> — treat this as a rough shape, not a figure. It firms up as months accumulate.`:''}
+      Plain accumulation; any interest or returns on what you invest are on top of this.
+    </div>
+    ${P.perYear>0&&P.coverMonths>0?`<div class="kpis" style="margin-top:10px">
+      <div class="kpi"><span class="lbl">A year buys you</span><div class="v">${P.coverMonths.toFixed(1)} mo</div>
+        <div class="d dimc">of living costs at ₹${money(P.medSpend)}/month</div></div>
+      <div class="kpi"><span class="lbl">Typical spend</span><div class="v">₹${money(P.medSpend)}</div>
+        <div class="d dimc">range ₹${money(P.loSpend)}–${money(P.hiSpend)}</div></div>
+    </div>`:''}
+  </div>`:''}
+
+  ${LV.length?`<div class="sec">
+    <span class="lbl">What a 10% trim is worth</span>
+    ${secNote('Annual effect of spending a tenth less in each, at your recent pace. Recurring commitments are excluded — those are cancelled, not trimmed.')}
+    <div class="card" style="padding:4px 14px">
+    ${LV.map(l=>`<div class="duerow">
+      <i class="dot" style="background:${l.color}"></i>
+      <div style="min-width:0;flex:1"><div class="t">${esc(l.name)}</div>
+        <div class="s">₹${money(l.perMonth)} a month now</div></div>
+      <span class="num good" style="font-weight:600;flex:none">+₹${money(l.yearly)}<span class="dimc" style="font-size:10px">/yr</span></span></div>`).join('')}
+    </div>
+    <div class="hint" style="padding:0 18px">Trimming all four adds <b>₹${money(LV.reduce((s,l)=>s+l.yearly,0))} a year</b>${P&&P.perYear>0?`, taking the projection to ₹${money(P.perYear+LV.reduce((s,l)=>s+l.yearly,0))}`:''}.</div>
+  </div>`:''}
+
+  <div class="sec">
+    <span class="lbl">Savings rate, last 12 months</span>
+    ${secNote('Share of income not spent. Grey stubs are months with no income figure recorded.')}
+    <div class="card pad14">${rateBar(hist)}</div>
+  </div>
+
+  ${cats.length?`<div class="sec">
+    <span class="lbl">Categories as a share of income</span>
+    ${secNote('Not share of spending — share of what you earned. A category at 4% of spending may be 1% of income, and that is the number that matters.')}
+    <div class="card pad14">
+    ${cats.map(([id,v])=>`<div class="bar">
+      <div class="top"><span style="display:flex;align-items:center;gap:8px;min-width:0">
+        <i class="dot" style="background:${CATMAP[id].color}"></i>
+        <b style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(CATMAP[id].name)}</b></span>
+        <span class="num" style="flex:none">${pctOf(v).toFixed(1)}% <span class="dimc" style="font-size:11px">₹${money(v)}</span></span></div>
+      <div class="track"><div class="fill" style="width:${Math.min(100,pctOf(v)/Math.max(1,pctOf(cats[0][1]))*100).toFixed(1)}%;background:${CATMAP[id].color}"></div></div>
+    </div>`).join('')}
+    </div></div>`:''}
+  <div style="height:16px"></div>`;
+}
+
 
 function vMore(){
   const n=live().length;
@@ -1473,8 +2110,8 @@ function editSheet(id,override){
     <div class="act"><button class="prim" id="eSave">Save changes</button></div>
     <div class="act" style="margin-top:22px"><button class="del" id="eDel">Delete this entry</button></div>`);
   const grab=()=>({amount:$('#eAmt',v).value,desc:$('#eDesc',v).value,date:$('#eDate',v).value||st.date,cat:st.cat});
-  $('#eCat',v).onclick=()=>{const live=grab();closeSheet();
-    catSheet(st.cat,c=>editSheet(id,{...live,cat:c}));};
+  $('#eCat',v).onclick=()=>{const current=grab();closeSheet();   // was named `live`, shadowing live()
+    catSheet(st.cat,c=>editSheet(id,{...current,cat:c}));};
   $('#eDel',v).onclick=async()=>{
     if(READONLY)return toast('Read-only — this is a backup view');
     const keep={deleted_at:e.deleted_at,updated_at:e.updated_at};
@@ -1510,7 +2147,7 @@ function catManageSheet(){
   const act=activeCats(), arch=CATS.filter(c=>c.is_archived);
   const row=c=>`<button class="mrow" data-edit-cat="${c.id}">
     <i class="dot" style="background:${c.color}"></i>
-    <span class="mname">${esc(c.name)}</span>
+    <span class="mname">${esc(c.name)}${c.is_transfer?' <span class="tag">TRANSFER</span>':''}</span>
     <span class="dimc" style="font-size:11.5px;flex:none">${catUsage(c.id)} used</span></button>`;
   const v=openSheet(`<h3>Categories</h3>
     <div class="pad" style="padding-bottom:6px">${act.map(row).join('')}</div>
@@ -1525,6 +2162,7 @@ function catEditSheet(id){
   const c=id?CATMAP[id]:null;
   const used=id?catUsage(id):0;
   let color=c?c.color:PALETTE[CATS.length%PALETTE.length];
+  let transfer=!!(c&&c.is_transfer);
   const v=openSheet(`<h3>${c?'Edit category':'New category'}</h3>
     <div class="pad">
       <label class="lbl" for="cName">Name</label>
@@ -1532,6 +2170,11 @@ function catEditSheet(id){
       <div class="lbl" style="margin:16px 0 8px">Colour</div>
       <div class="swatches">${PALETTE.map(p=>`<button class="sw ${p===color?'on':''}" data-sw="${p}"
         style="background:${p}" aria-label="colour ${p}"></button>`).join('')}</div>
+      <div style="height:18px"></div>
+      <button class="mrow" id="cTrans" style="margin:0"><i class="dot" style="background:${transfer?'#8A7BF0':'#3A404C'}"></i>
+        <span class="mname">Transfer, not spending</span>
+        <span class="chip sm ${transfer?'on':''}" style="pointer-events:none;flex:none">${transfer?'On':'Off'}</span></button>
+      <div class="hint">For money moved rather than spent — an RD deposit, a transfer to savings. Entries in a transfer category stay in your Log but are kept out of every spending total, so they cannot understate your savings rate.</div>
       ${c?`<div class="hint" style="margin-top:16px">${used
         ?`Used by <b>${used}</b> ${used===1?'entry':'entries'}. Hiding keeps every one of them intact — it only removes this from the picker for new expenses.`
         :'Not used by any entry yet, so it can be deleted outright.'}</div>`:''}
@@ -1541,6 +2184,12 @@ function catEditSheet(id){
       <button id="cArch">${c.is_archived?'Unhide':'Hide from picker'}</button>
       ${used?'':'<button class="del" id="cDel">Delete</button>'}</div>`:''}`);
 
+  $('#cTrans',v).onclick=()=>{
+    transfer=!transfer;
+    const dot=$('#cTrans .dot',v),chip=$('#cTrans .chip',v);
+    dot.style.background=transfer?'#8A7BF0':'#3A404C';
+    chip.className='chip sm'+(transfer?' on':'');chip.textContent=transfer?'On':'Off';
+  };
   v.querySelectorAll('[data-sw]').forEach(b=>b.onclick=()=>{
     color=b.dataset.sw;
     v.querySelectorAll('[data-sw]').forEach(x=>x.classList.toggle('on',x.dataset.sw===color));
@@ -1550,7 +2199,7 @@ function catEditSheet(id){
     if(READONLY)return toast('Read-only — this is a backup view');
     try{ await DB.put('categories',rows); }
     catch(err){ console.error(err); return toast('Could not save category'); }
-    CATS=await DB.all('categories');
+    CATS=await DB.all('categories');DATA_VER++;
     CATS.sort((a,b)=>a.sort-b.sort);CATMAP=Object.fromEntries(CATS.map(x=>[x.id,x]));
     closeSheet();render();toast(msg);
   };
@@ -1560,8 +2209,8 @@ function catEditSheet(id){
     if(!name)return toast('Give it a name');
     if(CATS.some(x=>x.id!==id&&x.name.toLowerCase()===name.toLowerCase()))
       return toast('You already have a category called that');
-    if(c)await persist({...c,name,color},'Category updated');
-    else await persist({id:'c'+Date.now().toString(36),name,color,
+    if(c)await persist({...c,name,color,is_transfer:transfer?1:0},'Category updated');
+    else await persist({id:'c'+Date.now().toString(36),name,color,is_transfer:transfer?1:0,
       sort:Math.max(0,...CATS.map(x=>x.sort||0))+1,is_archived:0},'Category added');
   };
   const ar=$('#cArch',v);
@@ -1574,7 +2223,7 @@ function catEditSheet(id){
     if(catUsage(c.id))return toast('In use — hide it instead');   // never orphan an expense
     try{ await DB.del('categories',c.id); }
     catch(err){ console.error(err); return toast('Could not delete'); }
-    CATS=(await DB.all('categories')).sort((a,b)=>a.sort-b.sort);
+    CATS=(await DB.all('categories')).sort((a,b)=>a.sort-b.sort);DATA_VER++;
     CATMAP=Object.fromEntries(CATS.map(x=>[x.id,x]));
     closeSheet();render();toast('Deleted');
   };
@@ -1594,13 +2243,19 @@ function dateSheet(){
 }
 
 /* ══════════════════ 8. ACTIONS ══════════════════ */
-let saving=false;                              // guards against a double-tap minting two rows
+/* Re-entrancy guard against a double-tap minting two rows.
+   Sound because the check and the set below are separated by no await —
+   JavaScript cannot interleave another invocation into synchronous code — and
+   the flag is released in a finally so no throw can wedge it permanently.
+   Verified by firing three concurrent calls and asserting one row is written.
+   Static analysers flag this shape as a race; it is not one here. */
+let saving=false;
 async function saveExpense(){
   if(READONLY)return toast('Read-only — this is a backup view');
-  if(saving)return;
-  const a=addState();
-  if(!(a.amount>0))return;
-  saving=true;
+  if(saving)return;                            // ─┐ no await between these two
+  const a=addState();                          //  │ lines, so the guard holds
+  if(!(a.amount>0))return;                     //  │
+  saving=true;                                 // ─┘
   const btn=$('#save');
   if(btn){btn.disabled=true;btn.textContent='Saving…';}
   const cat=a.cat||'misc';
@@ -1622,10 +2277,10 @@ async function saveExpense(){
   }
   try{ if(S.catManual)await learn(row.description,cat); }   // confirmed choices only
   catch(err){ console.warn('categoriser learn failed',err); }  // never lose the expense over this
-  EXP.unshift(row);
+  finally{ saving=false; }                                   // released on every path
+  EXP.unshift(row);DATA_VER++;
   buzz(14);toast('₹'+money2(row.amount)+' · '+CATMAP[cat].name);
   S.quick='';S.amount='';S.desc='';S.cat=null;S.catManual=false;S.dateManual=false;S.date=today();
-  saving=false;
   render();
   const f=$('#quick');if(f)f.focus();          // stay in flow for the next entry
 }
@@ -1657,7 +2312,7 @@ function backupJSON(){
 async function shareBackup(){
   const name='ledger-backup-'+today()+'.json';
   let file=null;
-  try{ file=new File([backupJSON()],name,{type:'application/json'}); }catch(e){}
+  try{ file=new File([backupJSON()],name,{type:'application/json'}); }catch{}
   if(file&&navigator.canShare&&navigator.canShare({files:[file]})){
     try{
       await navigator.share({files:[file],title:'Ledger backup'});
@@ -1671,6 +2326,10 @@ async function shareBackup(){
   await markExport();toast('Saved to your downloads');
 }
 
+/* FUTURE — merge is last-write-wins on updated_at, which silently discards the
+   loser when the same entry was edited on two devices. Fine today because only
+   one device writes. Real two-way sync needs per-field versioning or a CRDT,
+   and that is a prerequisite for the Postgres replica, not an afterthought. */
 async function doImport(file){
   if(READONLY)return toast('Read-only — reload to leave the backup view');
   try{
@@ -1697,13 +2356,13 @@ async function openViewer(file){
     if(!j.expenses||!Array.isArray(j.expenses))throw new Error('not a Ledger backup');
     if(Array.isArray(j.categories)&&j.categories.length){
       CATS=j.categories.slice().sort((a,b)=>(a.sort||0)-(b.sort||0));
-      CATMAP=Object.fromEntries(CATS.map(c=>[c.id,c]));
+      CATMAP=Object.assign(Object.create(null),Object.fromEntries(CATS.map(c=>[c.id,c])));
     }
     EXP=j.expenses.filter(e=>e&&e.amount>0&&/^\d{4}-\d{2}-\d{2}$/.test(e.spent_on))
       .map(e=>CATMAP[e.category_id]?e:{...e,category_id:'misc'})
       .sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:0);
     RULES=new Map((j.rules||[]).map(r=>[r.token,r]));
-    READONLY=true;S.view='ins';S.detail=false;
+    READONLY=true;DATA_VER++;S.view='ins';S.tsec='over';
     closeSheet();render();window.scrollTo(0,0);
     toast(EXP.length+' entries loaded, read-only');
   }catch(err){ console.error(err); toast('Could not read that file: '+err.message); }
@@ -1711,6 +2370,7 @@ async function openViewer(file){
 
 /* ══════════════════ 9. BOOT + RENDER ══════════════════ */
 async function reload(){
+  DATA_VER++;
   if(READONLY){render();return;}            // viewer data is in memory, not IndexedDB
   const [ex,ru]=await Promise.all([DB.all('expenses'),DB.all('rules')]);
   EXP=ex.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
@@ -1722,26 +2382,73 @@ const NAVS=[
   ['add','Add','M12 5v14M5 12h14'],
   ['log','Log','M4 6h16M4 12h16M4 18h11'],
   ['ins','Trends','M4 19V5M4 19h16M8 15l3-5 3 3 4-7'],
-  ['rec','Recurring','M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4'],
+  ['money','Money','M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.7 5 3.2 5 1.3 5 3.3-2.2 3-5 3-5-1.1-5-3'],
   ['more','More','M5 12h.01M12 12h.01M19 12h.01']
 ];
+/* Crosshair scrub. Reads a value at any point without hover, which phones do
+   not have. Pointer events cover touch and mouse, so this works on the laptop
+   viewer too. */
+function bindScrub(){
+  const wrap=$('#heroChart');
+  if(!wrap||!HERO||!HERO.xy||HERO.xy.length<2)return;
+  const read=$('#heroRead'),svg=wrap.querySelector('svg');
+  if(!svg)return;
+  const n=HERO.xy.length;
+  let active=false;
+  const at=cx=>{
+    const r=svg.getBoundingClientRect();
+    if(!r.width)return 0;
+    return Math.max(0,Math.min(n-1,Math.round((cx-r.left)/r.width*(n-1))));
+  };
+  const show=i=>{
+    const p=HERO.xy[i],g=document.getElementById('xh'),
+          ln=document.getElementById('xhLine'),dt=document.getElementById('xhDot');
+    if(!g)return;
+    g.setAttribute('opacity','1');
+    ln.setAttribute('x1',p.x);ln.setAttribute('x2',p.x);
+    dt.setAttribute('cx',p.x);dt.setAttribute('cy',p.y);
+    read.innerHTML=heroReadout(i);
+  };
+  const hide=()=>{
+    const g=document.getElementById('xh');if(g)g.setAttribute('opacity','0');
+    read.innerHTML=heroReadout(null);active=false;
+  };
+  wrap.onpointerdown=e=>{active=true;wrap.setPointerCapture&&wrap.setPointerCapture(e.pointerId);
+    buzz(5);show(at(e.clientX));};
+  wrap.onpointermove=e=>{if(active){e.preventDefault();show(at(e.clientX));}};
+  const release=e=>{
+    try{ if(e&&wrap.releasePointerCapture&&wrap.hasPointerCapture&&wrap.hasPointerCapture(e.pointerId))
+      wrap.releasePointerCapture(e.pointerId); }catch{}
+    hide();
+  };
+  wrap.onpointerup=wrap.onpointercancel=wrap.onpointerleave=release;
+}
+
 /* Horizontal swipe to step through months — a date dropdown is a poor fit for
    a thumb, and stepping periods is the single most common action on these screens. */
 function swipeMonths(){
   const el=$('#app');let x0=null,y0=null;
   el.classList.add('swipe');
-  el.ontouchstart=e=>{if(e.touches.length!==1)return;x0=e.touches[0].clientX;y0=e.touches[0].clientY;};
+  el.ontouchstart=e=>{
+    // the chart owns horizontal drags inside itself — never block its gesture
+    if(e.target.closest&&e.target.closest('#heroWrap')){x0=null;return;}
+    if(e.touches.length!==1)return;
+    x0=e.touches[0].clientX;y0=e.touches[0].clientY;
+  };
   el.ontouchend=e=>{
     if(x0===null)return;
     const dx=e.changedTouches[0].clientX-x0, dy=e.changedTouches[0].clientY-y0;
     x0=null;
     if(Math.abs(dx)<60||Math.abs(dx)<Math.abs(dy)*1.6)return;   // ignore vertical scrolls
-    const months=[...new Set(live().map(e=>monKey(e.spent_on)))].sort().reverse();
-    const key=S.view==='ins'?'insMonth':'logMonth';
-    const i=months.indexOf(S[key]);
-    const j=i+(dx<0?1:-1);                                       // swipe left = older
+    if(S.view==='ins'){                       // swipe between views, like tabbed pagers
+      const i=TSECT.findIndex(t=>t[0]===S.tsec), j=i+(dx<0?1:-1);
+      if(j<0||j>=TSECT.length)return;
+      S.tsec=TSECT[j][0];buzz();render();window.scrollTo(0,0);return;
+    }
+    const months=[...new Set(live().map(x=>monKey(x.spent_on)))].sort().reverse();
+    const i=months.indexOf(S.logMonth), j=i+(dx<0?1:-1);          // swipe left = older
     if(j<0||j>=months.length)return;
-    S[key]=months[j];buzz();render();window.scrollTo(0,0);
+    S.logMonth=months[j];buzz();render();window.scrollTo(0,0);
   };
 }
 
@@ -1753,7 +2460,7 @@ function render(){
     align-items:center;gap:12px"><span style="flex:1">Viewing a backup file. Nothing here is saved.</span>
     <button id="exitView" style="flex:none;padding:0 13px;min-height:34px;border-radius:8px;
       background:var(--hot);color:#140A05;font-weight:700;font-size:12.5px">Exit</button></div>`:'';
-  app.innerHTML=banner+{add:vAdd,log:vLog,ins:vInsights,rec:vRecurring,more:vMore}[S.view]();
+  app.innerHTML=banner+{add:vAdd,log:vLog,ins:vInsights,money:vMoney,more:vMore}[S.view]();
   const navs=READONLY?NAVS.filter(n=>n[0]!=='add'):NAVS;
   $('#nav').style.gridTemplateColumns='repeat('+navs.length+',1fr)';
   $('#nav').innerHTML=navs.map(([k,l,d])=>`<button data-v="${k}" class="${S.view===k?'on':''}"
@@ -1823,6 +2530,15 @@ function bind(){
     };
   }
   if(S.view==='ins'){
+    if(S.tsec==='over')bindScrub();
+    document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{
+      if(S.range===b.dataset.range)return;S.range=b.dataset.range;buzz();render();});
+    document.querySelectorAll('[data-metric]').forEach(b=>b.onclick=()=>{
+      if(S.metric===b.dataset.metric)return;S.metric=b.dataset.metric;buzz();render();});
+    document.querySelectorAll('[data-tog]').forEach(b=>b.onclick=()=>{
+      const k=b.dataset.tog;
+      if(k==='smooth'&&S.metric==='cum')return toast('A running total is already smooth');
+      S[k]=!S[k];buzz();render();});
     document.querySelectorAll('[data-imon]').forEach(b=>b.onclick=()=>{S.insMonth=b.dataset.imon;render();});
     document.querySelectorAll('[data-mbar]').forEach(r=>r.onclick=()=>{
       const k=last12()[+r.dataset.mbar].key;
@@ -1836,8 +2552,15 @@ function bind(){
       const q=$('#quick');if(q)q.focus();
       toast('Adding for '+dayLabel(d));
     });
-    const mb=$('#moreBtn');if(mb)mb.onclick=()=>{S.detail=true;render();};
-    const lb=$('#lessBtn');if(lb)lb.onclick=()=>{S.detail=false;render();window.scrollTo(0,0);};
+    document.querySelectorAll('[data-tsec]').forEach(b=>b.onclick=()=>{
+      if(S.tsec===b.dataset.tsec)return;
+      S.tsec=b.dataset.tsec;buzz();render();window.scrollTo(0,0);});
+  }
+  document.querySelectorAll('[data-hz]').forEach(b=>b.onclick=()=>{S.horizon=+b.dataset.hz;buzz();render();});
+  document.querySelectorAll('[data-ann]').forEach(b=>b.onclick=()=>{S.rannual=b.dataset.ann==='1';buzz();render();});
+  if(S.view==='money'){
+    const ib=$('#incBtn');if(ib)ib.onclick=incomeSheet;
+    document.querySelectorAll('[data-imon]').forEach(b=>b.onclick=()=>{S.insMonth=b.dataset.imon;render();});
   }
   if(S.view==='ins'||S.view==='log')swipeMonths();
   if(S.view==='more'){
@@ -1884,17 +2607,17 @@ function bind(){
    shortest path that exists on this platform. */
 function readLaunchParams(){
   let P;
-  try{P=new URLSearchParams(location.search);}catch(e){return;}
+  try{P=new URLSearchParams(location.search);}catch{return;}
   if(![...P.keys()].length)return;
   const shared=[P.get('title'),P.get('text'),P.get('url')].filter(Boolean).join(' ').trim();
   if(shared){S.view='add';S.mode='quick';S.quick=shared.slice(0,120);S.focusQuick=true;}
   const go=P.get('go');
-  if(go&&['add','log','ins','rec','more'].includes(go)){
+  if(go&&['add','log','ins','money','more'].includes(go)){
     S.view=go;
     if(go==='add')S.focusQuick=true;
   }
   // strip the query so a reload or relaunch doesn't replay the same intent
-  try{history.replaceState({},'',location.pathname);}catch(e){}
+  try{history.replaceState({},'',location.pathname);}catch{}
 }
 
 (async function boot(){
@@ -1905,8 +2628,11 @@ function readLaunchParams(){
     await DB.put('categories',cats);
     await DB.put('meta',{k:'schema_version',v:SCHEMA_VERSION});
   }
-  CATS=cats.sort((a,b)=>a.sort-b.sort);CATMAP=Object.fromEntries(CATS.map(c=>[c.id,c]));
+  CATS=cats.sort((a,b)=>a.sort-b.sort);CATMAP=Object.assign(Object.create(null),Object.fromEntries(CATS.map(c=>[c.id,c])));
   S.persisted=real?await requestPersist():null;
+  try{const ic=await DB.get('meta','income');
+    if(ic&&ic.v)INCOME={monthly:0,period:'month',overrides:{},...JSON.parse(ic.v)};
+  }catch(e){console.warn('income load failed',e);}
   const le=await DB.get('meta','last_export');
   const first=(await DB.all('expenses')).length;
   S.backupNudge=(first>15&&(!le||daysBetween(le.v,today())>14))?(le?daysBetween(le.v,today()):999):0;
@@ -1915,7 +2641,7 @@ function readLaunchParams(){
   await reload();
   if(S.focusQuick){
     const q=$('#quick');
-    if(q){q.focus();try{q.setSelectionRange(q.value.length,q.value.length);}catch(e){}}
+    if(q){q.focus();try{q.setSelectionRange(q.value.length,q.value.length);}catch{}}
     S.focusQuick=false;
   }
   if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
