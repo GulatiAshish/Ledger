@@ -200,6 +200,11 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
 .sw{aspect-ratio:1;border-radius:9px;border:2px solid transparent;min-height:34px}
 .sw.on{border-color:var(--ink);transform:scale(1.06)}
 
+.duerow{display:flex;align-items:center;gap:11px;padding:11px 0;border-bottom:1px dashed var(--line)}
+.duerow:last-child{border-bottom:0}
+.duerow .t{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.duerow .s{font-size:11px;color:var(--mute);margin-top:2px}
+
 /* ---------- misc ---------- */
 .banner{margin:12px 18px;padding:11px 13px;border-radius:11px;font-size:12.5px;line-height:1.4;
         background:var(--hotdim);border:1px solid var(--hot);color:#FFC0A2}
@@ -490,6 +495,12 @@ function frequents(limit=6){
 }
 
 /* ══════════════════ 3. ANALYTICS ══════════════════ */
+/* Read-only viewer, for opening a backup on a laptop.
+   Deliberately read-only. IndexedDB is per-device, so a laptop copy would be a
+   second writable database with no sync between them — edit on both and one
+   set of changes is silently lost the next time you import. A viewer that
+   never writes cannot diverge, so the phone stays the single source of truth. */
+let READONLY=false;
 let EXP=[];                                    // live cache, non-deleted, date-desc
 const live=()=>EXP.filter(e=>!e.deleted_at);
 function byMonth(){
@@ -704,6 +715,86 @@ function sizeBuckets(key){
   return{labels:L,cnt,val};
 }
 
+/* Forward cash flow. Every expense tracker looks backwards; the recurring
+   detector already knows what is due and roughly when, which is enough to
+   project the committed side of the next month. Only commitments are
+   forecastable — discretionary spending is a decision, not a schedule. */
+function upcoming(days=30){
+  const R=detectRecurring().filter(r=>r.confidence>=45);
+  const end=addDays(today(),days), items=[];
+  for(const r of R){
+    let d=r.next, guard=0;
+    if(d<today()){ items.push({r,date:d,overdue:true}); d=addDays(d,r.gap); }
+    while(d<=end && guard++<15){ items.push({r,date:d,overdue:false}); d=addDays(d,r.gap); }
+  }
+  items.sort((a,b)=>a.date<b.date?-1:1);
+  const committed=items.reduce((s,x)=>s+x.r.mean,0);
+  // variable estimate from the last 60 days of non-recurring spend
+  const sigs=new Set(R.map(r=>r.sig));
+  const since=addDays(today(),-60);
+  const varSpend=live().filter(e=>e.spent_on>=since&&!sigs.has(signature(e)))
+    .reduce((s,e)=>s+e.amount,0);
+  const varPerDay=varSpend/60;
+  const cum=[];let run=0,i=0;
+  for(let d=0;d<days;d++){
+    const day=addDays(today(),d);
+    while(i<items.length&&items[i].date<=day){run+=items[i].r.mean;i++;}
+    cum.push(run);
+  }
+  return{items,committed,cum,days,end,varPerDay,varEstimate:varPerDay*days,
+    overdue:items.filter(x=>x.overdue).length};
+}
+
+/* Annualised habit cost. Frequency × unit price is the number that actually
+   lands — a ₹380 lunch reads differently as ₹3,000 a month. Only annualise
+   from a window long enough to mean something: extrapolating a year from two
+   events a week apart produces confident nonsense. */
+function habits(){
+  const g={};
+  for(const e of live()){
+    const k=(e.description||'').toLowerCase().trim();
+    if(k.length<3)continue;
+    const o=(g[k]??={n:0,total:0,first:e.spent_on,last:e.spent_on,cat:e.category_id,label:e.description});
+    o.n++;o.total+=e.amount;
+    if(e.spent_on<o.first)o.first=e.spent_on;
+    if(e.spent_on>o.last){o.last=e.spent_on;o.cat=e.category_id;o.label=e.description;}
+  }
+  return Object.values(g).filter(h=>h.n>=4).map(h=>{
+    const span=Math.max(daysBetween(h.first,h.last),1);
+    const perMonth=h.total/span*30;
+    return{...h,span,perMonth,perYear:perMonth*12,avg:h.total/h.n};
+  }).filter(h=>h.span>=45)          // under ~6 weeks there is nothing to annualise
+   .sort((a,b)=>b.perYear-a.perYear).slice(0,6);
+}
+
+/* Entry-time guard. The review-time outlier check runs days later, by which
+   point a mistyped extra zero has already skewed the median, the bridge, the
+   concentration curve and the recurring amounts. Catching it in the second
+   before saving is worth far more. Threshold is stricter than review-time
+   (3.5 MAD vs 2.5) because a false alarm here interrupts every entry. */
+function entryWarnings(a){
+  const out=[];
+  if(!(a.amount>0))return out;
+  const key=(a.desc||'').toLowerCase().trim();
+  if(key.length>=3){
+    const dup=live().find(e=>e.spent_on===a.date&&Math.abs(e.amount-a.amount)<0.01
+      &&(e.description||'').toLowerCase().trim()===key);
+    if(dup)out.push('You already logged ₹'+money(a.amount)+' for "'+esc(dup.description)+'" on this date.');
+  }
+  if(a.cat){
+    const h=live().filter(e=>e.category_id===a.cat).map(e=>e.amount);
+    if(h.length>=6){
+      const r=robust(h), scale=r.mad||r.median*0.25;
+      if(scale&&(a.amount-r.median)/scale>=3.5){
+        const mult=r.median?a.amount/r.median:0;
+        out.push((mult>=2?mult.toFixed(1)+'× ':'Well above ')+'your usual ₹'+money(r.median)
+          +' for '+esc(CATMAP[a.cat].name)+'. Check for an extra zero.');
+      }
+    }
+  }
+  return out;
+}
+
 /* Data quality. Every number above assumes you logged everything. Days with no
    entry at all are the honest caveat — say so rather than quietly understating. */
 function loggingGaps(key){
@@ -888,6 +979,11 @@ function previewHTML(){
     <button class="chip ${a.date!==today()?'on':''}" id="datebtn">${a.date===today()?'Today':dayLabel(a.date)}</button>
   </div>`;
 }
+function warnHTML(){
+  const w=entryWarnings(addState());
+  if(!w.length)return '';
+  return w.map(t=>`<div class="banner warn" role="status" style="margin:10px 18px 0">${t}</div>`).join('');
+}
 function saveLabel(){const a=addState();
   return a.amount>0?'Save  ·  ₹'+fmtAmt(String(a.amount)):'Enter an amount';}
 
@@ -935,6 +1031,7 @@ function vAdd(){
       <button class="key" data-k="del" aria-label="delete last digit">⌫</button>
     </div>`}
 
+  <div id="warn">${warnHTML()}</div>
   <button class="save" id="save" ${addState().amount>0?'':'disabled'}>${saveLabel()}</button>
 
   ${tRows.length?`<div class="recent"><div class="lbl" style="margin-bottom:6px">Entered today</div>
@@ -1028,6 +1125,7 @@ function vInsights(){
   const conc=concentration(S.insMonth);
   const odd=unusual(S.insMonth);
   const buckets=sizeBuckets(S.insMonth);
+  const HB=habits();
   const cum=arr=>{let t=0;return arr.map(v=>t+=v);};
   const curCum=cum(cur.daily.slice(0,cur.elapsed));
   const prevCum=prev?cum(prev.daily):[];
@@ -1153,6 +1251,20 @@ function vInsights(){
     <div class="hint">Same shape, same scale, six panels — differences between categories jump out that a single combined chart would bury. The percentage compares this month against that category's own average of the prior five.</div>
   </div>`:''}
 
+  ${HB.length?`<div class="sec">
+    <span class="lbl">What your habits cost per year</span>
+    <div class="card" style="padding:4px 14px">
+    ${HB.map(h=>`<div class="duerow">
+      <i class="dot" style="background:${CATMAP[h.cat].color}"></i>
+      <div style="min-width:0;flex:1">
+        <div class="t" style="text-transform:capitalize">${esc(h.label)}</div>
+        <div class="s">${h.n}× at ₹${money(h.avg)} · ₹${money(h.perMonth)}/month</div>
+      </div>
+      <span class="num" style="font-weight:600;flex:none">₹${money(h.perYear)}<span class="dimc" style="font-size:10px">/yr</span></span></div>`).join('')}
+    </div>
+    <div class="hint">Frequency × unit price, annualised from your actual pace. A ₹${money(HB[0].avg)} decision made ${HB[0].n} times reads very differently as a yearly figure. Only items seen 4+ times over at least six weeks appear — anything shorter would be extrapolating from noise.</div>
+  </div>`:''}
+
   ${conc&&conc.n>4?`<div class="sec">
     <span class="lbl">Concentration</span>
     <div class="card" style="padding:14px 12px 8px">${paretoSVG(conc.curve)}</div>
@@ -1213,11 +1325,43 @@ function vInsights(){
 
 function vRecurring(){
   const R=detectRecurring();
+  const U=upcoming(30);
   const fixed=R.reduce((s,r)=>s+r.monthly,0);
   const due=R.filter(r=>r.overdue);
   return `
   <div class="hd"><h1>Recurring</h1>
     <div class="sub lbl">${R.length} detected · ~₹${money(fixed)}/month committed</div></div>
+  ${U.items.length?`
+    <div class="sec">
+      <span class="lbl">Committed over the next 30 days</span>
+      <div class="kpis" style="margin-top:8px">
+        <div class="kpi"><span class="lbl">Already owed</span><div class="v">₹${money(U.committed)}</div>
+          <div class="d dimc">${U.items.length} payment${U.items.length===1?'':'s'} due</div></div>
+        <div class="kpi"><span class="lbl">Plus variable</span><div class="v">₹${money(U.varEstimate)}</div>
+          <div class="d dimc">at ₹${money(U.varPerDay)}/day recently</div></div>
+      </div>
+      <div class="card" style="padding:14px 12px 10px;margin-top:10px">
+        ${lineChart([{data:U.cum,color:'#FF7A3D',fill:true}])}
+        <div class="legend"><span>Commitments accumulating to ${dayLabel(U.end)}</span></div>
+      </div>
+      <div class="hint">This is the part of next month already decided. Discretionary spending is a choice each day, so it is estimated separately rather than forecast.</div>
+    </div>
+
+    <div class="sec">
+      <span class="lbl">What is due, and when</span>
+      <div class="card" style="padding:4px 14px">
+      ${U.items.slice(0,14).map(x=>`<div class="duerow">
+        <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
+        <div style="min-width:0;flex:1">
+          <div class="t">${esc(x.r.label)}</div>
+          <div class="s">${x.overdue?'<b class="hot">overdue — expected '+dayLabel(x.date)+'</b>':dayLabel(x.date)} · ${x.r.cadence.toLowerCase()}</div>
+        </div>
+        <span class="num" style="font-weight:600;flex:none">₹${money(x.r.mean)}</span></div>`).join('')}
+      </div>
+      ${U.items.length>14?`<div class="hint">${U.items.length-14} more beyond this.</div>`:''}
+    </div>
+  `:''}
+
   ${R.length?`
     ${due.length?`<div class="banner">${due.length} ${due.length===1?'item is':'items are'} past their expected date — either you missed logging ${due.length===1?'it':'them'}, or ${due.length===1?'it':'they'} stopped.</div>`:''}
     <div class="sec">
@@ -1259,6 +1403,9 @@ function vMore(){
     <div class="s">Same file, saved to this phone's downloads.</div></div><button id="expJson">Export</button></div>
   <div class="setrow"><div><div class="t">Export spreadsheet (CSV)</div>
     <div class="s">For Excel, or loading into Postgres later.</div></div><button id="expCsv">Export</button></div>
+  <div class="setrow"><div><div class="t">Open a backup (read-only)</div>
+    <div class="s">For viewing on a laptop. Nothing is written — your phone stays the only copy that changes.</div></div><button id="viewBtn">Open</button></div>
+  <input type="file" id="viewFile" accept=".json,application/json" style="display:none">
   <div class="setrow"><div><div class="t">Import backup</div>
     <div class="s">Merges by ID, newest edit wins. Never destructive.</div></div><button id="impBtn">Import</button></div>
   <input type="file" id="impFile" accept=".json,application/json" style="display:none">
@@ -1329,6 +1476,7 @@ function editSheet(id,override){
   $('#eCat',v).onclick=()=>{const live=grab();closeSheet();
     catSheet(st.cat,c=>editSheet(id,{...live,cat:c}));};
   $('#eDel',v).onclick=async()=>{
+    if(READONLY)return toast('Read-only — this is a backup view');
     const keep={deleted_at:e.deleted_at,updated_at:e.updated_at};
     e.deleted_at=now();e.updated_at=now();               // soft delete — survives a future sync
     try{ await DB.put('expenses',e); }
@@ -1341,6 +1489,7 @@ function editSheet(id,override){
     });
   };
   $('#eSave',v).onclick=async()=>{
+    if(READONLY)return toast('Read-only — this is a backup view');
     const f=grab(),a=parseFloat(f.amount);
     if(!(a>0))return toast('Amount must be greater than 0');
     const keep={amount:e.amount,description:e.description,spent_on:e.spent_on,
@@ -1398,6 +1547,7 @@ function catEditSheet(id){
   });
 
   const persist=async(rows,msg)=>{
+    if(READONLY)return toast('Read-only — this is a backup view');
     try{ await DB.put('categories',rows); }
     catch(err){ console.error(err); return toast('Could not save category'); }
     CATS=await DB.all('categories');
@@ -1446,6 +1596,7 @@ function dateSheet(){
 /* ══════════════════ 8. ACTIONS ══════════════════ */
 let saving=false;                              // guards against a double-tap minting two rows
 async function saveExpense(){
+  if(READONLY)return toast('Read-only — this is a backup view');
   if(saving)return;
   const a=addState();
   if(!(a.amount>0))return;
@@ -1521,6 +1672,7 @@ async function shareBackup(){
 }
 
 async function doImport(file){
+  if(READONLY)return toast('Read-only — reload to leave the backup view');
   try{
     const j=JSON.parse(await file.text());
     if(!j.expenses||!Array.isArray(j.expenses))throw new Error('not a Ledger backup');
@@ -1539,8 +1691,27 @@ async function doImport(file){
   }catch(e){toast('Import failed: '+e.message);}
 }
 
+async function openViewer(file){
+  try{
+    const j=JSON.parse(await file.text());
+    if(!j.expenses||!Array.isArray(j.expenses))throw new Error('not a Ledger backup');
+    if(Array.isArray(j.categories)&&j.categories.length){
+      CATS=j.categories.slice().sort((a,b)=>(a.sort||0)-(b.sort||0));
+      CATMAP=Object.fromEntries(CATS.map(c=>[c.id,c]));
+    }
+    EXP=j.expenses.filter(e=>e&&e.amount>0&&/^\d{4}-\d{2}-\d{2}$/.test(e.spent_on))
+      .map(e=>CATMAP[e.category_id]?e:{...e,category_id:'misc'})
+      .sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:0);
+    RULES=new Map((j.rules||[]).map(r=>[r.token,r]));
+    READONLY=true;S.view='ins';S.detail=false;
+    closeSheet();render();window.scrollTo(0,0);
+    toast(EXP.length+' entries loaded, read-only');
+  }catch(err){ console.error(err); toast('Could not read that file: '+err.message); }
+}
+
 /* ══════════════════ 9. BOOT + RENDER ══════════════════ */
 async function reload(){
+  if(READONLY){render();return;}            // viewer data is in memory, not IndexedDB
   const [ex,ru]=await Promise.all([DB.all('expenses'),DB.all('rules')]);
   EXP=ex.sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:(b.created_at>a.created_at?1:-1));
   RULES=new Map(ru.map(r=>[r.token,r]));
@@ -1577,11 +1748,19 @@ function swipeMonths(){
 function render(){
   const app=$('#app');
   app.ontouchstart=app.ontouchend=null;app.classList.remove('swipe');   // reset per-view gestures
-  $('#app').innerHTML={add:vAdd,log:vLog,ins:vInsights,rec:vRecurring,more:vMore}[S.view]();
-  $('#nav').innerHTML=NAVS.map(([k,l,d])=>`<button data-v="${k}" class="${S.view===k?'on':''}"
+  if(READONLY&&S.view==='add')S.view='ins';
+  const banner=READONLY?`<div class="banner" role="status" style="margin:12px 18px 0;display:flex;
+    align-items:center;gap:12px"><span style="flex:1">Viewing a backup file. Nothing here is saved.</span>
+    <button id="exitView" style="flex:none;padding:0 13px;min-height:34px;border-radius:8px;
+      background:var(--hot);color:#140A05;font-weight:700;font-size:12.5px">Exit</button></div>`:'';
+  app.innerHTML=banner+{add:vAdd,log:vLog,ins:vInsights,rec:vRecurring,more:vMore}[S.view]();
+  const navs=READONLY?NAVS.filter(n=>n[0]!=='add'):NAVS;
+  $('#nav').style.gridTemplateColumns='repeat('+navs.length+',1fr)';
+  $('#nav').innerHTML=navs.map(([k,l,d])=>`<button data-v="${k}" class="${S.view===k?'on':''}"
     aria-label="${l}" aria-current="${S.view===k?'page':'false'}">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg><span>${l}</span></button>`).join('');
   bind();
+  const ex=$('#exitView');if(ex)ex.onclick=()=>location.reload();
 }
 function bind(){
   document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{
@@ -1592,6 +1771,7 @@ function bind(){
     const refresh=()=>{                    // patch preview + save only; never re-render the focused input
       $('#preview').innerHTML=previewHTML();
       const s=$('#save');s.disabled=!(addState().amount>0);s.textContent=saveLabel();
+      const w=$('#warn');if(w)w.innerHTML=warnHTML();
       bindPreview();
     };
     const bindPreview=()=>{
@@ -1668,7 +1848,9 @@ function bind(){
       await markExport();toast('Backup downloaded');
     };
     $('#expCsv').onclick=async()=>{download('expenses-'+today()+'.csv',toCSV(),'text/csv');await markExport();};
-    $('#impBtn').onclick=()=>$('#impFile').click();
+    $('#viewBtn').onclick=()=>$('#viewFile').click();
+    $('#viewFile').onchange=e=>{if(e.target.files[0])openViewer(e.target.files[0]);};
+    $('#impBtn').onclick=()=>$('#impBtn')&&$('#impFile').click();
     $('#impFile').onchange=e=>{if(e.target.files[0])doImport(e.target.files[0]);};
     $('#persistBtn').onclick=async()=>{S.persisted=await requestPersist();
       toast(S.persisted?'Persistent storage granted':'Denied — install to home screen first');render();};
