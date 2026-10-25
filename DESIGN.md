@@ -1,4 +1,7 @@
 # Design notes
+
+*Ledger — Copyright 2026 Ashish Gulati. All rights reserved.*
+
 Reasoning behind the interface and the analytics. Most decisions here were made against published research rather than taste, and the sources are cited where they apply.
 
 ---
@@ -47,7 +50,7 @@ Material Design 3 caps this: *avoid more than four tabs at once; at five or more
 
 **Medians, not means.** Spending is strongly right-skewed — a few large days drag the average well above what a normal day looks like. Typical-day figures use the median with the mean shown beside it, so the gap between them is visible instead of misleading. Quartiles show the spread.
 
-**Outliers by median ± 2.5 × MAD**, following Leys et al. (2013), rather than mean ± SD. The reason is specific: the mean and standard deviation are themselves distorted by the outliers being hunted, so that rule routinely misses obvious ones. MAD has a 50% breakdown point. Transactions are compared against their own category's history — a large rent payment isn't unusual, a large coffee is — falling back to all spending for categories with too little history to have a norm.
+**Outliers by median ± 2.5 × MAD on the log of the amount**, following Leys et al. (2013), rather than mean ± SD. Spending amounts are roughly lognormal, so a ₹40 coffee and a ₹400 dinner sit on one scale only after taking logs; on raw amounts nearly every large purchase looked unusual. MAD is multiplied by 1.4826 so it estimates a standard deviation — without that constant the threshold is about a third too tight. The reason is specific: the mean and standard deviation are themselves distorted by the outliers being hunted, so that rule routinely misses obvious ones. MAD has a 50% breakdown point. Transactions are compared against their own category's history — a large coffee is unusual, a large dinner may not be — falling back to all spending for categories with too little history to have a norm. Fixed-cost categories are never flagged: rent being large is the point of rent.
 
 **Concentration is measured, not assumed.** The 80/20 rule is quoted far more often than it holds; Byron Sharp's work puts the real ratio nearer 50/20 in consumer data. So the app reports the actual curve — how many transactions carry half a month, and what share the top fifth hold — rather than asserting a rule.
 
@@ -85,13 +88,61 @@ Income is take-home rather than gross. Tax and deductions never reach the accoun
 
 ## Commitments
 
-Detection groups entries by a two-token description signature, requires at least three occurrences, takes the median gap between them, and matches it against weekly / fortnightly / monthly / quarterly / half-yearly / yearly with per-cadence tolerance, requiring 60% of gaps within tolerance and an amount coefficient of variation at or below 0.45.
+Detection groups entries by a two-token description signature, takes the median gap between them, and matches it against weekly / fortnightly / monthly / quarterly / half-yearly / yearly with per-cadence tolerance and an amount coefficient of variation at or below 0.45.
+
+Two refinements came from real use. A median gap alone let a near-daily habit with a few skipped days pass as weekly, so the gaps must also be regular — coefficient of variation at or below 0.35, or 80% of gaps within tolerance — and shorter cadences need more evidence: five occurrences for weekly, four for fortnightly, three for monthly. In the other direction, rent was missed because two payments are not three, so a fixed-cost category needs only two monthly occurrences. The forecast amount is the latest payment for fixed costs (rent changes in steps, and the last step is the current one) and the median of the last three otherwise.
 
 **The annual total is the headline.** This category of tool exists because of a perception gap — surveys find people underestimate their subscription spending by roughly 2.5×. Monthly figures are easy to wave away; annual ones are not.
 
 **Price rises are flagged.** Recent occurrences are compared against earlier ones; anything past 8% is reported with the step, the date it changed, and the annual impact. A quiet increase per charge is invisible and material over a year.
 
+**Commitments can be added by hand.** Detection needs history, so a new rent agreement or an annual premium paid once is invisible to it. A hand-added commitment joins the same list at full confidence and feeds the allowance and forward view exactly like a detected one. A logged payment is matched to it by description, or by category at an amount within 15%, which marks that payment as committed and moves the due date on — so it is set aside once, not twice. Monthly dates step by calendar month from the original date rather than by 30 days, so the 1st stays the 1st. If a hand-added commitment covers the same payments as a detected one, the detected one is dropped.
+
 **Lapsed items ask rather than assert.** The app cannot distinguish a cancelled service from one that simply stopped being logged, and both are worth attention.
+
+## Daily allowance
+
+Version 1.1 adds a daily figure on the Add screen. It is the feature most likely to backfire, so the design follows the research closely.
+
+**The trap.** A study reported by the Behavioral Economics Institute found that showing people a precise remaining budget made them spend *more*, not less, and most of all late in the period, when the remaining figure looks like permission. The mitigations that worked were rolling budgets, ranges rather than single numbers, a buffer, shorter windows, and updating mid-period. Splitting money into many small budgets made things worse — which is the second reason, after it being declined earlier, that there are no per-category budgets.
+
+**What follows from that:**
+
+- **Daily, not monthly.** A short window, updated every time you save.
+- **A range.** A target (with the savings goal set aside) and a ceiling (without it). Landing between the two is "stretching", not failing.
+- **Asymmetric rollover.** The allowance is the lower of the steady rate — money for the month spread over its days — and the rolling rate — money left spread over the days left. Overspending lowers the days that follow, so it gets absorbed. Underspending does not raise them: a pure rolling allowance climbed to several times the steady rate by month-end in testing, which is exactly the late-period permission the study warns about. The surplus is reported as money ahead of plan instead.
+- **Fixed costs come off first.** Rent and bills are set aside before anything is divided by days, including ones detected as due but not yet paid, so the first of the month doesn't show a huge allowance that collapses when rent clears.
+- **Savings goal defaults to 20%**, and the first month is prorated from the first logged day.
+
+Without income the card falls back to today against a typical day, which needs no setup.
+
+## Coverage
+
+The first real backup exposed a class of bug that synthetic data never produces: **the month you start logging is partial**. Treated as a complete month it looks like the cheapest month on record, so every comparison against it shows a huge increase, savings for months before you started read as 100%, and projections drift down. The app now finds the first logged day and treats a month as complete only when at least 90% of its days fall after it. Partial months are excluded from comparisons and projections and the views say why, rather than going silent.
+
+The same applies inside a month: **the current month is compared with the same number of days of the previous one**. "₹X so far, 12% less than the same 24 days of last month" is a fair comparison; against all thirty days of last month, every month in progress looks like a saving.
+
+## Logging habits
+
+**No streak counter.** Silverman and Barasch (Journal of Consumer Research, 2023) found that a broken streak makes people more likely to abandon the behaviour altogether — the streak becomes the goal and losing it removes the reason to continue. Logging dots show "logged on 5 of the last 7 days", which a missed day dents rather than resets, and a one-line prompt offers to add yesterday when it has nothing.
+
+**No reminders.** Scheduled local notifications would need the Notification Triggers API, which never shipped in Chrome. A push server would break the no-backend design. The in-app recap is the substitute.
+
+**Time-aware chips.** Repeat chips are ranked by how often an item is logged near the current hour, then recency, then frequency, and pre-fill your usual (median) amount — leave the amount off and "Save · ₹90 usual" says what will be recorded.
+
+## Payments
+
+A survey of Indian UPI users (arXiv 2401.09937) found 74% reported spending more since adopting UPI and around 60% reported overspending, attributing it to the payment feeling less real than cash. So the app records the method — optional, parsed from the text, the last one remembered — and shows the split over 90 days. No judgement is attached to it; the point is to make the split visible.
+
+## Appearance
+
+**Light mode exists, and Auto is the default.** NN/g's review of the research finds that for people with normal vision, dark text on a light background gives better reading performance, and that the right default is to follow the system setting. The app was dark-only. Theme is now Auto, Light or Dark, with four accent colours, all tokens checked against WCAG AA in both themes — the lowest pair measures 4.99:1.
+
+Chart colours are resolved from the active tokens at render time rather than written as `var()` inside SVG attributes, which browsers handle inconsistently.
+
+**Category icons.** The same UPI study found 41% of respondents wanted icons in spending summaries; transaction rows now carry an icon per category, with a monogram for custom categories.
+
+---
 
 ## Read-only laptop viewer
 
@@ -101,7 +152,7 @@ Deliberately read-only. IndexedDB is per-device, so a writable second copy would
 
 ## Audit
 
-ESLint 9 with correctness and security rules, a 99-assertion property suite, and static passes for XSS, prototype pollution and uncleaned resources.
+ESLint 9 with correctness and security rules, a 152-assertion property suite, and static passes for XSS, prototype pollution and uncleaned resources.
 
 **Fixed:**
 
@@ -113,13 +164,20 @@ ESLint 9 with correctness and security rules, a 99-assertion property suite, and
 - **Dead code** left over when the interactive chart replaced two earlier trend panels.
 - **Recurring detection recomputed seven times per render.** O(n log n) with tokenisation over every entry. Now memoised against a version counter that every mutation bumps.
 
-**Reviewed and left alone:** nine `require-atomic-updates` warnings on the save path, all false positives. The re-entrancy guard is sound because the check and the set are separated by no `await` — JavaScript cannot interleave another invocation into synchronous code — and the flag releases in a `finally`. Verified by firing concurrent calls and asserting a single row is written.
+**Fixed in 1.1, found by running against a real backup:**
+
+- **Partial first month** treated as complete (see Coverage), producing a four-digit percentage headline and 100% savings for months before logging began.
+- **Missing 1.4826 constant** in the MAD threshold, which together with the next item flagged about a quarter of all transactions as unusual.
+- **Rent flagged as unusual** and **missed as recurring** (two occurrences); a near-daily item detected as weekly.
+- **Repeat chips used the mean**, so one large lunch set the default amount for every lunch after it.
+- **The category map was rebuilt as a plain object** in three places after the earlier prototype-pollution fix. All rebuilds now go through one function.
+
+**Reviewed and left alone:** eleven `require-atomic-updates` warnings on the save path, all false positives. The re-entrancy guard is sound because the check and the set are separated by no `await` — JavaScript cannot interleave another invocation into synchronous code — and the flag releases in a `finally`. Verified by firing concurrent calls and asserting a single row is written.
 
 **Property suite:** quantile and MAD against hand-computed values; `addDays`/`daysBetween` proven inverse across 400 days, month ends, year ends, and both leap and non-leap February; Indian lakh grouping; and invariants on generated data — daily totals sum to the month, bridge steps sum to the net change, the concentration curve is monotonic and terminates at exactly 1.0, size buckets reconcile to total and count, week buckets tile with no gaps, cumulative series never decrease, and compare series align across all twenty range × metric combinations. Every analytic also runs against empty data and against a single entry.
 
 ---
-*Ledger — Copyright 2026 Ashish Gulati — Apache-2.0*
----
+
 ## Sources
 
 - Nielsen Norman Group — [confirmation dialogs](https://www.nngroup.com/articles/confirmation-dialog/), [proximity of consequential options](https://www.nngroup.com/articles/proximity-consequential-options/)
@@ -128,3 +186,8 @@ ESLint 9 with correctness and security rules, a 99-assertion property suite, and
 - Material Design 3 — [tabs](https://m3.material.io/components/tabs/guidelines)
 - Harms et al. (2015), on layout strategies for long content on smartphones
 - Leys et al. (2013), on median absolute deviation for outlier detection
+- Behavioral Economics Institute — [The Budgeting App Trap: when spending information backfires](https://www.behavioraleconomics.com/the-budgeting-app-trap-when-spending-information-backfires/)
+- Nielsen Norman Group — [dark mode vs. light mode](https://www.nngroup.com/articles/dark-mode/)
+- [From Cash to Cashless: UPI's impact on spending behavior among Indian users](https://arxiv.org/abs/2401.09937) (arXiv 2401.09937)
+- Silverman & Barasch (2023), [On or Off Track: How (Broken) Streaks Affect Consumer Decisions](https://www.colorado.edu/business/faculty-research/2023/04/19/or-track-how-broken-streaks-affect-consumer-decisions), *Journal of Consumer Research*
+- [arXiv cond-mat/0201195](https://arxiv.org/abs/cond-mat/0201195), on the lognormal shape of personal expenditure
