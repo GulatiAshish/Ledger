@@ -3,12 +3,12 @@
  * Copyright 2026 Ashish Gulati
  * https://github.com/GulatiAshish/Ledger
  *
- * SPDX-License-Identifier: Apache-2.0
- * Licensed under the Apache License, Version 2.0. See LICENSE and NOTICE.
+ * All rights reserved. Proprietary — see LICENSE.
+ * No copying, modification or redistribution without written permission.
  */
 /* Ledger service worker.
    Bump CACHE when you change any file below, otherwise the phone keeps the old copy. */
-const CACHE = 'ledger-v17';
+const CACHE = 'ledger-v19';
 
 /* Everything the app needs to run. There are no other network calls anywhere —
    fonts are self-hosted, charts are inline SVG, storage is IndexedDB. */
