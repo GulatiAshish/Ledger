@@ -8,7 +8,7 @@
  */
 /* Ledger service worker.
    Bump CACHE when you change any file below, otherwise the phone keeps the old copy. */
-const CACHE = 'ledger-v16';
+const CACHE = 'ledger-v17';
 
 /* Everything the app needs to run. There are no other network calls anywhere —
    fonts are self-hosted, charts are inline SVG, storage is IndexedDB. */
