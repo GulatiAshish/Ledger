@@ -4,22 +4,17 @@
   Copyright 2026 Ashish Gulati
   https://github.com/GulatiAshish/Ledger
 
-  SPDX-License-Identifier: Apache-2.0
+  All rights reserved. Proprietary — see LICENSE.
 
-  Licensed under the Apache License, Version 2.0 (the "License");
-  you may not use this file except in compliance with the License.
-  You may obtain a copy at http://www.apache.org/licenses/LICENSE-2.0
-
-  Section 4 of the License requires that derivative works retain this
-  notice, carry prominent notices stating that files were changed, and
-  reproduce the contents of the accompanying NOTICE file.
+  Copying, hosting, modifying, redesigning or redistributing this file,
+  in whole or in part, requires the author's prior written permission.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="author" content="Ashish Gulati">
 <meta name="description" content="Offline-first expense tracker. No account, no server, no data leaves your device.">
-<meta name="copyright" content="Copyright 2026 Ashish Gulati — Apache-2.0">
+<meta name="copyright" content="Copyright 2026 Ashish Gulati. All rights reserved.">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <title>Ledger</title>
 <meta name="theme-color" content="#0E0F12">
@@ -313,6 +308,18 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
 .tbar i{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:var(--hot);transition:width .5s cubic-bezier(.2,.8,.2,1)}
 .today.warn .tbar i{background:var(--amber)}.today.bad .tbar i{background:var(--bad)}
 .tbar b{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--ink);opacity:.7}
+.trt{display:flex;align-items:center;gap:6px}
+.tgoal{font-size:10px;font-weight:700;letter-spacing:.08em;padding:4px 8px;border-radius:999px;color:var(--mute);border:1px solid var(--line2);white-space:nowrap}
+.today[data-plan]{cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .12s}
+.today[data-plan]:active{transform:scale(.985)}
+.today[data-plan]:focus-visible{outline:2px solid var(--hot);outline-offset:2px}
+[data-cm]{cursor:pointer}
+.calc{margin-top:12px;padding:11px 14px;border-radius:13px;background:var(--surf2);border:1px solid var(--line)}
+.calc .clbl{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.crow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13.5px;padding:4px 0;color:var(--mute)}
+.crow b{color:var(--ink);font-weight:600;flex:none}.crow b.hot{color:var(--hot2)}.crow b.bad{color:var(--bad)}
+.crow.tot{border-top:1px dashed var(--line2);margin-top:4px;padding-top:8px}
+.cnote{font-size:11px;color:var(--dim);line-height:1.5;margin-top:6px}
 .tsub{font-size:12.5px;color:var(--mute);line-height:1.55;margin-top:3px}
 .tsub b{color:var(--ink);font-weight:600}.tsub b.good{color:var(--good)}.tsub b.bad{color:var(--bad)}
 .dots{display:flex;align-items:center;gap:5px;margin-top:9px;padding-top:9px;border-top:1px dashed var(--line2)}
@@ -419,14 +426,14 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
 
 <script>
 'use strict';
-/* Ledger — Copyright 2026 Ashish Gulati — Apache-2.0
+/* Ledger — Copyright 2026 Ashish Gulati. All rights reserved.
    https://github.com/GulatiAshish/Ledger
-   Derivative works must retain this notice and reproduce NOTICE (License §4). */
+   Proprietary. No copying, modification or redistribution without written permission (see LICENSE). */
 const APP={
-  name:'Ledger', version:'1.1.0',
+  name:'Ledger', version:'1.2.0',
   author:'Ashish Gulati',
   repo:'https://github.com/GulatiAshish/Ledger',
-  license:'Apache-2.0',
+  license:'All rights reserved',
   copyright:'Copyright 2026 Ashish Gulati'
 };
 try{
@@ -837,10 +844,76 @@ function signature(e){
    hit it on a single render of Trends or Money. Invalidated by DATA_VER, which
    every mutation bumps. */
 let _recCache=null,_recVer=-1;
+let _manIds=new Set();
 function detectRecurring(){
   if(_recCache&&_recVer===DATA_VER)return _recCache;
-  _recCache=_detectRecurring();_recVer=DATA_VER;
+  const man=manualRecurring(), mine=new Set(man.out.map(r=>r.sig));
+  _manIds=man.ids;
+  // a hand-added commitment replaces whatever detection found for the same payments,
+  // so nothing is counted twice
+  const auto=_detectRecurring().filter(r=>!mine.has(r.sig)&&
+    r.entries.filter(e=>man.ids.has(e.id)).length<r.entries.length/2);
+  _recCache=[...man.out,...auto].sort((a,b)=>b.monthly-a.monthly);_recVer=DATA_VER;
   return _recCache;
+}
+function manualIds(){detectRecurring();return _manIds;}
+
+/* ── Commitments added by hand ──
+   For payments detection can't see yet: a new rent agreement, an SIP, an annual
+   premium that has only happened once. Stored as data, so they travel with a
+   backup, and soft-deleted like entries so an older backup can't resurrect one.
+   Each joins the recurring list at full confidence, which means it feeds the
+   daily allowance, the forward view and every committed total exactly like a
+   detected one.
+   Monthly dates are stepped by calendar month from the original due date, not by
+   30 days, so a payment due on the 1st stays on the 1st, and one due on the 31st
+   lands on the last day of shorter months without drifting. */
+let COMMITS=[];
+const MCAD={weekly:{name:'Weekly',days:7,per:52},monthly:{name:'Monthly',months:1,per:12},
+  quarterly:{name:'Quarterly',months:3,per:4},yearly:{name:'Yearly',months:12,per:1}};
+const activeCommits=()=>COMMITS.filter(c=>!c.deleted_at);
+function occ(anchor,c,i){
+  if(c.days)return addDays(anchor,c.days*i);
+  const [y,m,d]=anchor.split('-').map(Number);
+  const t=new Date(y,m-1+c.months*i,1), dim=new Date(t.getFullYear(),t.getMonth()+1,0).getDate();
+  return t.getFullYear()+'-'+pad2(t.getMonth()+1)+'-'+pad2(Math.min(d,dim));
+}
+function occAfter(anchor,c,d){         // first occurrence strictly after d
+  let i=0,x=anchor;while(x<=d&&i<5000)x=occ(anchor,c,++i);return x;
+}
+const stepRec=(r,d)=>r.cad?occAfter(r.anchor,r.cad,d):addDays(d,r.gap);
+const commitNext=m=>{const c=MCAD[m.cadence]||MCAD.monthly;return m.next>=today()?m.next:occAfter(m.next,c,addDays(today(),-1));};
+function manualRecurring(){
+  const t=today(), cutoff=addDays(t,-420), out=[], ids=new Set();
+  for(const m of activeCommits()){
+    const c=MCAD[m.cadence]||MCAD.monthly, cat=CATMAP[m.cat]?m.cat:'misc';
+    const gap=c.days||Math.round(c.months*30.4), early=Math.max(2,Math.round(gap/4));
+    const sig=signature({description:m.label,category_id:cat});
+    // a logged payment counts if it reads the same, or sits in the same category at about this amount
+    const ents=live().filter(e=>e.spent_on>=cutoff&&(signature(e)===sig||
+      (e.category_id===cat&&Math.abs(e.amount-m.amount)<=m.amount*0.15)))
+      .sort((a,b)=>a.spent_on<b.spent_on?-1:1);
+    for(const e of ents)ids.add(e.id);
+    let i=0,prev=null,d=m.next;
+    while(d<t&&i<5000){prev=d;d=occ(m.next,c,++i);}
+    const paidFor=x=>ents.some(e=>e.spent_on>=addDays(x,-early)&&e.spent_on<=t);
+    let next=d,overdue=false;
+    if(prev&&!paidFor(prev)){next=prev;overdue=true;}       // came due, nothing logged
+    else if(paidFor(d))next=occ(m.next,c,i+1);              // already paid ahead of the date
+    out.push({manual:true,id:m.id,anchor:m.next,cad:c,entries:ents,sig,label:m.label,cat,
+      n:ents.length,cadence:c.name,gap,mean:m.amount,min:m.amount,max:m.amount,stable:true,
+      last:ents.length?ents[ents.length-1].spent_on:null,next,overdue,expect:m.amount,
+      monthly:m.amount*c.per/12,fixedCat:isFixedCat(cat),confidence:100});
+  }
+  return{out,ids};
+}
+const validCommit=c=>c&&typeof c.id==='string'&&typeof c.label==='string'&&c.label.trim().length>0&&
+  c.label.length<=60&&isFinite(c.amount)&&c.amount>0&&MCAD[c.cadence]&&/^\d{4}-\d{2}-\d{2}$/.test(c.next||'')&&
+  typeof c.cat==='string';
+async function saveCommits(list){
+  const prev=COMMITS;COMMITS=list;DATA_VER++;
+  try{await DB.put('meta',{k:'commits',v:JSON.stringify(COMMITS)});}
+  catch(e){if(COMMITS===list){COMMITS=prev;DATA_VER++;}throw e;}   // roll back only our own change
 }
 /* FUTURE — detection is median-gap plus amount stability, which is robust and
    explainable but misses two real cases: charges that shift weekday (last
@@ -982,7 +1055,8 @@ function moneyFor(k){
     const endOfMonth=k+'-'+pad2(st.dim);
     for(const r of R){
       let d=r.next,g=0;
-      while(d<=endOfMonth&&g++<10){ if(d>=today())stillDue+=r.expect; d=addDays(d,r.gap); }
+      if(r.manual&&r.overdue&&monKey(d)===k){stillDue+=r.expect;d=stepRec(r,d);}
+      while(d<=endOfMonth&&g++<10){ if(d>=today())stillDue+=r.expect; d=stepRec(r,d); }
     }
   }
   const daysLeft=st.isCur?Math.max(0,st.dim-st.elapsed):0;
@@ -1102,7 +1176,7 @@ function recSigs(){
   if(_recSigVer!==DATA_VER){_recSigs=new Set(detectRecurring().filter(r=>r.confidence>=45).map(r=>r.sig));_recSigVer=DATA_VER;}
   return _recSigs;
 }
-const isCommitted=e=>isFixedCat(e.category_id)||recSigs().has(signature(e));
+const isCommitted=e=>isFixedCat(e.category_id)||recSigs().has(signature(e))||manualIds().has(e.id);
 
 let _mpCache=nullMap(),_mpVer=-1,_mpDay='';
 function monthPlan(k){
@@ -1118,7 +1192,8 @@ function monthPlan(k){
   if(isCur){
     for(const r of detectRecurring().filter(x=>x.confidence>=45)){
       let d=r.next,g=0;
-      while(d<=end&&g++<10){if(d>=today()){stillDue+=r.expect;dueCats.add(r.cat);}d=addDays(d,r.gap);}
+      if(r.manual&&r.overdue&&monKey(d)===k){stillDue+=r.expect;dueCats.add(r.cat);d=stepRec(r,d);}
+      while(d<=end&&g++<10){if(d>=today()){stillDue+=r.expect;dueCats.add(r.cat);}d=stepRec(r,d);}
     }
     // a fixed category not paid yet this month, with no forecast covering it: expect last month's amount
     const pk=monKey(addDays(k+'-01',-1));
@@ -1244,7 +1319,7 @@ function fixedVsVariable(key){
   const sigs=new Set(rec.map(r=>r.sig));
   const rows=live().filter(e=>monKey(e.spent_on)===key);
   let fixed=0,variable=0;
-  for(const e of rows)((sigs.has(signature(e))||isFixedCat(e.category_id))?fixed+=e.amount:variable+=e.amount);
+  for(const e of rows)((sigs.has(signature(e))||isFixedCat(e.category_id)||manualIds().has(e.id))?fixed+=e.amount:variable+=e.amount);
   return{fixed,variable,total:fixed+variable,
     pct:fixed+variable?fixed/(fixed+variable)*100:0,baseline:rec.reduce((s,r)=>s+r.monthly,0)};
 }
@@ -1378,7 +1453,7 @@ function priceChanges(minPct=8){
    Both matter and the app cannot tell them apart, so it asks rather than asserts. */
 function lapsed(){
   return detectRecurring()
-    .filter(r=>daysBetween(r.next,today())>r.gap*0.5)
+    .filter(r=>!r.manual&&daysBetween(r.next,today())>r.gap*0.5)
     .map(r=>({r,since:daysBetween(r.last,today()),
       missed:Math.max(1,Math.floor(daysBetween(r.next,today())/r.gap)+1)}))
     .sort((a,b)=>b.r.monthly-a.r.monthly);
@@ -1398,15 +1473,15 @@ function upcoming(days=30){
   const end=addDays(today(),days), items=[];
   for(const r of R){
     let d=r.next, guard=0;
-    if(d<today()){ items.push({r,date:d,overdue:true}); d=addDays(d,r.gap); }
-    while(d<=end && guard++<15){ items.push({r,date:d,overdue:false}); d=addDays(d,r.gap); }
+    if(d<today()){ items.push({r,date:d,overdue:true}); d=stepRec(r,d); }
+    while(d<=end && guard++<15){ items.push({r,date:d,overdue:false}); d=stepRec(r,d); }
   }
   items.sort((a,b)=>a.date<b.date?-1:1);
   const committed=items.reduce((s,x)=>s+x.r.expect,0);
   // variable estimate from the last 60 days of non-recurring spend
   const sigs=new Set(R.map(r=>r.sig));
   const since=addDays(today(),-60);
-  const varSpend=live().filter(e=>e.spent_on>=since&&!sigs.has(signature(e))&&!isFixedCat(e.category_id))
+  const varSpend=live().filter(e=>e.spent_on>=since&&!sigs.has(signature(e))&&!isFixedCat(e.category_id)&&!manualIds().has(e.id))
     .reduce((s,e)=>s+e.amount,0);
   const ts=trackStart();
   const window_=ts?Math.max(1,Math.min(60,daysBetween(ts>since?ts:since,today())+1)):60;
@@ -1881,8 +1956,9 @@ function todayCard(){
   else if(P.ahead>1)monthLine=`<b class="good">₹${money(P.ahead)} ahead</b> this month — unspent, it's savings.`;
   else if(P.ahead<-1)monthLine=`<b class="bad">₹${money(-P.ahead)} behind</b> — today's allowance absorbs it.`;
   else monthLine=`Right on plan for the month.`;
-  return `<div class="today ${tone}">
-    <div class="trow"><span class="lbl">${over?'Over today':'Left today'}</span>${pill}</div>
+  return `<div class="today ${tone}" data-plan role="button" tabindex="0">
+    <div class="trow"><span class="lbl">${over?'Over today':'Left today'}</span>
+      <span class="trt"><span class="tgoal">SAVE ${Math.round(goalPct()*100)}% ›</span>${pill}</span></div>
     <div class="tval num">${over?'−':''}₹${money(Math.abs(P.left))}</div>
     <div class="tbar"><i style="width:${fillPct.toFixed(1)}%"></i><b style="left:${markPct.toFixed(1)}%"></b></div>
     <div class="tsub"><b>₹${money(P.spent)}</b> spent of <b>₹${money(P.allowance)}</b> · ceiling ₹${money(P.ceiling)}</div>
@@ -2321,9 +2397,11 @@ function tWhen(c){
 /* ── Committed: the former Recurring tab, folded in ── */
 function tCommitted(c){
   const R=detectRecurring();
+  const addBtn=`<button class="chip sm" id="addCommit">+ Add a committed payment</button>`;
   if(!R.length)return `<div class="empty">Nothing recurring detected yet.<br><br>
     Detection needs <b>3 or more</b> entries with a similar description and a steady gap.
-    Subscriptions, rent and fuel usually surface within two months.</div>`;
+    Subscriptions, rent and fuel usually surface within two months — or add one yourself.
+    <div style="margin-top:16px">${addBtn}</div></div>`;
   const monthly=R.reduce((s,r)=>s+r.monthly,0);
   const U=upcoming(S.horizon), pc=priceChanges(), lp=lapsed();
   const byMonth=nullMap();for(const x of U.items)(byMonth[monKey(x.date)]??=[]).push(x);
@@ -2335,6 +2413,7 @@ function tCommitted(c){
       <div class="v num">₹${money(monthly*12)}</div>
       <div class="d dimc">committed per year · ₹${money(monthly)} a month across ${R.length} commitment${R.length===1?'':'s'}</div>
     </div>
+    <div style="margin-top:12px">${addBtn}</div>
   </div>
 
   <div class="seg" style="margin:14px 0 0;padding:0 18px">
@@ -2357,10 +2436,10 @@ function tCommitted(c){
       <span class="lbl">Due in ${monLabel(k)}</span>
       <span class="num dimc" style="font-size:12.5px">₹${money(byMonth[k].reduce((s,x)=>s+x.r.expect,0))}</span></div>
     <div class="card" style="padding:4px 14px">
-    ${byMonth[k].map(x=>`<div class="duerow ${x.overdue?'od':''}">
+    ${byMonth[k].map(x=>`<div class="duerow ${x.overdue?'od':''}"${x.r.manual?` data-cm="${esc(x.r.id)}" role="button" tabindex="0"`:''}>
       <i class="dot" style="background:${CATMAP[x.r.cat].color}"></i>
       <div style="min-width:0;flex:1"><div class="t">${esc(x.r.label)}</div>
-        <div class="s">${x.overdue?'<b class="hot">overdue · expected '+dayLabel(x.date)+'</b>':dayLabel(x.date)} · ${x.r.cadence.toLowerCase()}</div></div>
+        <div class="s">${x.overdue?'<b class="hot">overdue · expected '+dayLabel(x.date)+'</b>':dayLabel(x.date)} · ${x.r.cadence.toLowerCase()}${x.r.manual?' · added by you':''}</div></div>
       <span class="num" style="font-weight:600;flex:none">₹${money(x.r.expect)}</span></div>`).join('')}
     </div></div>`).join('')}
 
@@ -2372,13 +2451,13 @@ function tCommitted(c){
         <button class="chip sm ${S.rannual?'on':''}" data-ann="1">Year</button></div>
     </div>
     <div class="card pad14">
-    ${sorted.map(r=>`<div class="bar">
+    ${sorted.map(r=>`<div class="bar"${r.manual?` data-cm="${esc(r.id)}" role="button" tabindex="0"`:''}>
       <div class="top"><span style="display:flex;align-items:center;gap:8px;min-width:0">
         <i class="dot" style="background:${CATMAP[r.cat].color}"></i>
         <b style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:capitalize">${esc(r.label)}</b></span>
         <span class="num" style="flex:none">₹${money(S.rannual?r.monthly*12:r.monthly)}</span></div>
       <div class="track"><div class="fill" style="width:${(r.monthly/max*100).toFixed(1)}%;background:${CATMAP[r.cat].color}"></div></div>
-      <div style="font-size:11px;margin-top:4px" class="dimc">${r.cadence} · ₹${money(r.expect)} next · ${r.stable?'fixed':'₹'+money(r.min)+'–'+money(r.max)} · ${r.confidence}% confidence</div>
+      <div style="font-size:11px;margin-top:4px" class="dimc">${r.cadence} · ₹${money(r.expect)} next · ${r.manual?'added by you · tap to edit':(r.stable?'fixed':'₹'+money(r.min)+'–'+money(r.max))+' · '+r.confidence+'% confidence'}</div>
     </div>`).join('')}
     </div>
   </div>
@@ -2441,11 +2520,70 @@ function vInsights(){
    Income turns absolute figures into ratios, which is where the meaning is:
    ₹58,000 spent means nothing on its own, ₹58,000 against ₹80,000 earned means
    a 27% savings rate. */
-function incomeSheet(){
+function commitSheet(id,draft){
+  if(READONLY)return toast('Read-only — this is a backup view');
+  const ex=id?COMMITS.find(c=>c.id===id&&!c.deleted_at):null;
+  const dflt=CATMAP.bills?'bills':CATS[0].id;
+  const st=draft||{label:ex?ex.label:'',amount:ex?String(ex.amount):'',cadence:ex?ex.cadence:'monthly',
+    next:ex?commitNext(ex):today(),cat:ex&&CATMAP[ex.cat]?ex.cat:dflt,catManual:!!ex};
+  const v=openSheet(`<h3>${ex?'Edit':'Add a'} committed payment</h3>
+    <div class="pad">
+      <div class="frow"><span class="lbl">What</span><input id="cLabel" maxlength="40" value="${esc(st.label)}" placeholder="Rent, SIP, insurance…"></div>
+      <div class="frow"><span class="lbl">Amount</span>
+        <input id="cAmt" type="number" inputmode="decimal" min="1" step="1" value="${esc(st.amount)}" placeholder="₹"></div>
+      <div class="frow"><span class="lbl">Due</span><input id="cNext" type="date" min="${today()}" value="${esc(st.next)}"></div>
+      <div class="gu">${Object.entries(MCAD).map(([k,c])=>
+        `<button class="chip sm ${st.cadence===k?'on':''}" data-cc="${k}">${c.name}</button>`).join('')}</div>
+      <div class="gu"><button class="chip on" id="cCat">
+        <i class="dot" style="background:${CATMAP[st.cat].color}"></i><span>${esc(CATMAP[st.cat].name)}</span></button></div>
+      <div class="hint">Set aside before your daily allowance is worked out. When you log the payment — same description,
+        or the same category at about this amount — it counts as this one, so it is never counted twice.</div>
+    </div>
+    <div class="act"><button class="prim" id="cSave">${ex?'Save changes':'Add payment'}</button></div>
+    ${ex?`<div class="act" style="margin-top:22px"><button class="del" id="cDel">Remove this payment</button></div>`:''}`);
+  let cadence=st.cadence,cat=st.cat,catManual=st.catManual;
+  const paintCat=()=>{const b=$('#cCat',v);b.querySelector('.dot').style.background=CATMAP[cat].color;
+    b.querySelector('span').textContent=CATMAP[cat].name;};
+  v.querySelectorAll('[data-cc]').forEach(b=>b.onclick=()=>{cadence=b.dataset.cc;
+    v.querySelectorAll('[data-cc]').forEach(x=>x.classList.toggle('on',x.dataset.cc===cadence));});
+  $('#cLabel',v).addEventListener('input',e=>{          // follow the name until a category is picked by hand
+    if(catManual)return;const g=guessCategory(e.target.value);if(g){cat=g.cat;paintCat();}});
+  const grab=()=>({label:$('#cLabel',v).value,amount:$('#cAmt',v).value,next:$('#cNext',v).value||st.next,cadence,cat,catManual});
+  $('#cCat',v).onclick=()=>{const cur=grab();closeSheet();
+    catSheet(cat,c=>commitSheet(id,{...cur,cat:c,catManual:true}));};
+  $('#cSave',v).onclick=async()=>{
+    const g=grab(), label=g.label.trim().replace(/\s+/g,' '), amount=parseFloat(g.amount);
+    if(!/[a-z]/i.test(label))return toast('Give it a name');
+    if(!(amount>0))return toast('Enter the amount');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(g.next))return toast('Pick the due date');
+    const t=now();
+    const row={id:ex?ex.id:uid(),label,amount:Math.round(amount*100)/100,cadence,next:g.next,cat,
+      created_at:ex?ex.created_at:t,updated_at:t,deleted_at:null};
+    try{await saveCommits([...COMMITS.filter(c=>c.id!==row.id),row]);}
+    catch(err){console.error(err);return toast('Could not save');}
+    closeSheet();buzz();render();toast(ex?'Payment updated':'Payment added');
+  };
+  const del=$('#cDel',v);
+  if(del)del.onclick=async()=>{
+    const before=COMMITS;
+    try{await saveCommits(COMMITS.map(c=>c.id===ex.id?{...c,deleted_at:now(),updated_at:now()}:c));}
+    catch(err){console.error(err);return toast('Could not remove');}
+    closeSheet();buzz(14);render();
+    toastUndo('Removed '+ex.label,async()=>{
+      try{await saveCommits(before.map(c=>c.id===ex.id?{...c,deleted_at:null,updated_at:now()}:c));render();toast('Restored');}
+      catch(err){console.error(err);toast('Could not restore');}
+    });
+  };
+}
+
+function incomeSheet(opts={}){
   const yearly=S.incPeriod==='year';
   const shown=yearly?(INCOME.monthly*12):INCOME.monthly;
-  const k=S.insMonth||monKey(today());
+  const k=opts.k||S.insMonth||monKey(today());
   const ov=INCOME.overrides&&INCOME.overrides[k];
+  const amtV=opts.amt!==undefined?opts.amt:(shown?String(Math.round(shown)):'');
+  const ovV=opts.ov!==undefined?opts.ov:(ov!==undefined&&ov!==null?String(Math.round(ov)):'');
+  const goalV=opts.goal!==undefined?opts.goal:String(Math.round(goalPct()*100));
   const v=openSheet(`<h3>Your income</h3>
     <div class="pad">
       <div class="seg" style="padding:0;margin-bottom:12px">
@@ -2454,23 +2592,49 @@ function incomeSheet(){
       </div>
       <label class="lbl" for="incAmt">Take-home ${yearly?'per year':'per month'}</label>
       <input id="incAmt" class="quickin" type="number" inputmode="decimal" min="0"
-        value="${shown?Math.round(shown):''}" placeholder="what actually reaches your account">
+        value="${esc(amtV)}" placeholder="what actually reaches your account">
       <div class="hint">Take-home, not gross — tax and deductions never land in your account, so counting them would flatter every ratio here.</div>
       <div style="height:18px"></div>
       <label class="lbl" for="incOv">Override for ${monLabel(k)} only</label>
       <input id="incOv" class="quickin" type="number" inputmode="decimal" min="0"
-        value="${ov!==undefined&&ov!==null?Math.round(ov):''}" placeholder="leave blank to use the usual figure">
+        value="${esc(ovV)}" placeholder="leave blank to use the usual figure">
       <div class="hint">For a month with an incentive, a bonus, or a gap.</div>
       <div style="height:18px"></div>
       <label class="lbl" for="incGoal">Save each month (% of take-home)</label>
       <input id="incGoal" class="quickin" type="number" inputmode="numeric" min="0" max="90" step="1"
-        value="${Math.round(goalPct()*100)}">
+        value="${esc(goalV)}">
+      <div class="calc" id="incCalc" aria-live="polite"></div>
       <div class="hint">Set aside before your daily allowance is worked out. 20% is the savings share in the common 50/30/20 split — set 0 to plan with everything after fixed costs.</div>
     </div>
     <div class="act"><button class="prim" id="incSave">Save</button></div>
     ${hasIncome()?`<div class="act" style="margin-top:18px"><button class="del" id="incClear">Remove income</button></div>`:''}`);
   v.querySelectorAll('[data-ip]').forEach(b=>b.onclick=()=>{
-    S.incPeriod=b.dataset.ip;closeSheet();incomeSheet();});
+    const to=b.dataset.ip;if(to===(yearly?'year':'month'))return;
+    const a=parseFloat($('#incAmt',v).value);
+    const amt=a>0?String(Math.round(to==='year'?a*12:a/12)):'';
+    const keep={k,amt,ov:$('#incOv',v).value,goal:$('#incGoal',v).value};
+    S.incPeriod=to;closeSheet();incomeSheet(keep);});
+  /* Live split. The same arithmetic as the daily allowance, run on whatever is
+     typed, so the effect of a savings percentage is visible before saving it. */
+  const mp=monthPlan(k), tracked=mp.dim-mp.startDay+1, share=tracked/mp.dim;
+  const calc=()=>{
+    const raw=parseFloat($('#incAmt',v).value)||0, base=yearly?raw/12:raw;
+    const o=parseFloat($('#incOv',v).value), inc=(o>0?o:base)*share;
+    const g=Math.min(90,Math.max(0,parseFloat($('#incGoal',v).value)||0))/100;
+    const box=$('#incCalc',v);
+    if(!(inc>0)){box.innerHTML=`<div class="crow"><span>Enter your take-home above to see how it splits.</span></div>`;return;}
+    const save=inc*g, left=inc-save-mp.fixedTotal, per=left/tracked;
+    box.innerHTML=`<div class="clbl">${monLabel(k)}${share<1?' · from day '+mp.startDay:''}</div>
+      <div class="crow"><span>Saved · ${Math.round(g*100)}%</span><b class="num">₹${money(save)}</b></div>
+      <div class="crow"><span>Committed</span><b class="num">₹${money(mp.fixedTotal)}</b></div>
+      <div class="crow tot"><span>Left to spend</span><b class="num${left<0?' bad':''}">${left<0?'−':''}₹${money(Math.abs(left))}</b></div>
+      <div class="crow"><span>Per day, on plan</span><b class="num${left<0?' bad':' hot'}">₹${money(Math.max(0,per))}</b></div>
+      <div class="cnote">Committed is fixed costs and recurring payments this month: ₹${money(mp.fixedSpent)} paid, ₹${money(mp.stillDue)} still due.</div>`;
+  };
+  ['#incAmt','#incOv','#incGoal'].forEach(q=>$(q,v).addEventListener('input',calc));
+  calc();
+  if(opts.focus==='goal'){const gi=$('#incGoal',v);
+    setTimeout(()=>{try{gi.scrollIntoView({block:'center'});gi.focus();gi.select();}catch{}},80);}
   $('#incSave',v).onclick=async()=>{
     const raw=parseFloat($('#incAmt',v).value)||0;
     const monthly=yearly?raw/12:raw;
@@ -2754,11 +2918,11 @@ function vMore(){
     <div class="an">${esc(APP.name)} <span class="av num">v${esc(APP.version)}</span></div>
     <div class="ab">Built by <b>${esc(APP.author)}</b></div>
     <div class="ab">${esc(APP.copyright)}</div>
-    <div class="ab">Licensed under ${esc(APP.license)}</div>
+    <div class="ab">${esc(APP.license)}</div>
     <button class="chip sm" id="repoBtn" style="margin-top:12px">View source</button>
     <div class="ab" style="margin-top:12px;font-size:11px;color:var(--dim)">
-      Free to use, modify and share. Derivative works must keep this attribution
-      and reproduce the NOTICE file, per section 4 of the licence.
+      Free to use here for your own expenses. Copying, modifying, redesigning
+      or redistributing the app needs the author's written permission.
     </div>
   </div>
   <div style="height:24px"></div>
@@ -3027,7 +3191,8 @@ function backupJSON(){
     generated_by:APP.name+' '+APP.version+' by '+APP.author,
     source:APP.repo, license:APP.license, copyright:APP.copyright,
     exported_at:now(),
-    expenses:EXP, categories:CATS, rules:[...RULES.values()]
+    expenses:EXP, categories:CATS, rules:[...RULES.values()],
+    income:INCOME, commitments:COMMITS
   },null,1);
 }
 /* A download lands in phone storage, which dies with the phone — so it isn't
@@ -3055,6 +3220,15 @@ async function shareBackup(){
    loser when the same entry was edited on two devices. Fine today because only
    one device writes. Real two-way sync needs per-field versioning or a CRDT,
    and that is a prerequisite for the Postgres replica, not an afterthought. */
+function cleanIncome(x){
+  if(!x||typeof x!=='object'||!(isFinite(x.monthly)&&x.monthly>=0))return null;
+  const ov={};
+  if(x.overrides&&typeof x.overrides==='object')
+    for(const k of Object.keys(x.overrides))if(/^\d{4}-\d{2}$/.test(k)&&isFinite(x.overrides[k])&&x.overrides[k]>0)ov[k]=+x.overrides[k];
+  const out={monthly:+x.monthly,period:x.period==='year'?'year':'month',overrides:ov};
+  if(isFinite(x.goalPct)&&x.goalPct>=0&&x.goalPct<=0.9)out.goalPct=+x.goalPct;
+  return(out.monthly>0||Object.keys(ov).length)?out:null;
+}
 async function doImport(file){
   if(READONLY)return toast('Read-only — reload to leave the backup view');
   try{
@@ -3070,6 +3244,18 @@ async function doImport(file){
     }
     if(merged.length)await DB.put('expenses',merged);   // single transaction: all or nothing
     if(j.rules&&Array.isArray(j.rules)&&j.rules.length)await DB.put('rules',j.rules);
+    // commitments merge like entries (newest edit wins, deletions included)
+    if(Array.isArray(j.commitments)){
+      const have=new Map(COMMITS.map(c=>[c.id,c]));let n=0;
+      for(const c of j.commitments){
+        if(!validCommit(c))continue;const ex=have.get(c.id);
+        if(!ex||(c.updated_at||'')>(ex.updated_at||'')){have.set(c.id,c);n++;}
+      }
+      if(n)await saveCommits([...have.values()]);
+    }
+    // income only fills a phone that has none, so restoring never overwrites a newer figure
+    const inc=cleanIncome(j.income);
+    if(inc&&!hasIncome())await saveIncome(inc);
     await reload();
     toast(merged.length+' entries merged');
   }catch(e){toast('Import failed: '+e.message);}
@@ -3086,6 +3272,8 @@ async function openViewer(file){
       .map(e=>CATMAP[e.category_id]?e:{...e,category_id:'misc'})
       .sort((a,b)=>a.spent_on<b.spent_on?1:a.spent_on>b.spent_on?-1:0);
     RULES=new Map((j.rules||[]).map(r=>[r.token,r]));
+    COMMITS=Array.isArray(j.commitments)?j.commitments.filter(validCommit):[];
+    {const inc=cleanIncome(j.income);if(inc)INCOME={...inc};}   // in memory only; the viewer never writes
     READONLY=true;DATA_VER++;S.view='ins';S.tsec='over';
     closeSheet();render();window.scrollTo(0,0);
     toast(EXP.length+' entries loaded, read-only');
@@ -3217,7 +3405,10 @@ function bind(){
       };
     };
     bindPreview();
-    const si=$('#setIncome');if(si)si.onclick=incomeSheet;
+    const si=$('#setIncome');if(si)si.onclick=()=>incomeSheet({k:monKey(today())});
+    const tp=$('[data-plan]');
+    if(tp){const go=()=>{buzz();incomeSheet({k:monKey(today()),focus:'goal'});};
+      tp.onclick=go;tp.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}};}
     const rx=$('#recapX');
     if(rx)rx.onclick=async()=>{await savePrefs({recapSeen:today()});render();};
     const ra=$('#recapAdd');
@@ -3300,9 +3491,12 @@ function bind(){
       S.tsec=b.dataset.tsec;buzz();render();window.scrollTo(0,0);});
   }
   document.querySelectorAll('[data-hz]').forEach(b=>b.onclick=()=>{S.horizon=+b.dataset.hz;buzz();render();});
+  document.querySelectorAll('[data-cm]').forEach(b=>{b.onclick=()=>commitSheet(b.dataset.cm);
+    b.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();commitSheet(b.dataset.cm);}};});
+  {const ac=$('#addCommit');if(ac)ac.onclick=()=>commitSheet(null);}
   document.querySelectorAll('[data-ann]').forEach(b=>b.onclick=()=>{S.rannual=b.dataset.ann==='1';buzz();render();});
   if(S.view==='money'){
-    const ib=$('#incBtn');if(ib)ib.onclick=incomeSheet;
+    const ib=$('#incBtn');if(ib)ib.onclick=()=>incomeSheet();
     document.querySelectorAll('[data-day]').forEach(r=>r.onclick=()=>{
       const d=r.dataset.day;
       S.date=d;S.dateManual=true;S.view='add';S.mode='quick';
@@ -3408,6 +3602,9 @@ function readLaunchParams(){
   try{const ic=await DB.get('meta','income');
     if(ic&&ic.v)INCOME={monthly:0,period:'month',overrides:{},...JSON.parse(ic.v)};
   }catch(e){console.warn('income load failed',e);}
+  try{const cm=await DB.get('meta','commits');
+    if(cm&&cm.v){const a=JSON.parse(cm.v);COMMITS=Array.isArray(a)?a.filter(validCommit):[];}
+  }catch(e){console.warn('commitments load failed',e);}
   const le=await DB.get('meta','last_export');
   const first=(await DB.all('expenses')).length;
   S.backupNudge=(first>15&&(!le||daysBetween(le.v,today())>14))?(le?daysBetween(le.v,today()):999):0;
