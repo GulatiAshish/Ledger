@@ -314,6 +314,35 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
 .today[data-plan]:active{transform:scale(.985)}
 .today[data-plan]:focus-visible{outline:2px solid var(--hot);outline-offset:2px}
 [data-cm]{cursor:pointer}
+.ledgercard{padding:12px 12px 6px}
+.fromrow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px}
+.sel{height:42px;padding:0 12px;border-radius:11px;background:var(--surf2);color:var(--ink);border:1px solid var(--line2);font:inherit;font-size:14px;min-width:0}
+.lnotes{padding:0 18px;margin-top:8px;font-size:11.5px;line-height:1.6;color:var(--dim)}
+.ledger{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:auto}
+.ledger th,.ledger td{padding:9px 0 9px 8px;text-align:right;white-space:nowrap;border-top:1px solid var(--line);font-weight:500}
+.ledger th:first-child{padding-left:0;text-align:left;color:var(--mute);font-weight:600}
+.ledger thead th{border-top:0;padding-top:2px;padding-bottom:8px;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.ledger td.num{color:var(--ink)}
+.ledger .pos{color:var(--good)!important}.ledger .neg{color:var(--bad)!important}
+.ledger td.pct,.ledger th.pct{color:var(--mute);width:1%}
+.ledger td.note{text-align:right;color:var(--dim);font-size:11.5px;font-style:italic}
+.ledger .yy{color:var(--dim);font-weight:500}
+.ledger sup{font-size:9px;color:var(--dim);margin-left:1px}
+.ledger .mk{font-style:normal;font-size:8.5px;margin-right:4px;color:var(--mute);vertical-align:1px}
+.ledger .mk.up{color:var(--good)}.ledger .mk.dn{color:var(--bad)}
+.ledger tr.yr th,.ledger tr.yr td{font-weight:650;color:var(--ink);border-top:1px solid var(--line2);cursor:pointer}
+.ledger tr.yr:focus-visible{outline:2px solid var(--hot);outline-offset:-2px}
+.ledger .chev{display:inline-block;width:14px;color:var(--dim);font-size:10px}
+.ledger tr.mo{cursor:pointer}
+.ledger tbody tr.mo th{padding-left:0}
+.ledger tbody tr.yr~tr.mo th{padding-left:14px;font-weight:500}
+.ledger tr.current td.num,.ledger tr.nolog td.num,.ledger tr.noinc td.num,.ledger tr.pre td.num{color:var(--mute)}
+.ledger td.run{color:var(--mute)!important;font-style:italic}
+.ledger tfoot th,.ledger tfoot td{border-top:2px solid var(--line2);font-weight:700;color:var(--ink);padding-top:11px;padding-bottom:6px}
+.ledger tfoot th{color:var(--ink)}
+.ledger .tn{display:block;font-size:10px;font-weight:600;color:var(--dim);letter-spacing:.04em;margin-top:1px;white-space:normal}
+.ledger tfoot th{white-space:normal;min-width:44px}
+@media (max-width:374px){.ledger{font-size:11.5px}.ledger th,.ledger td{padding-left:6px}.ledgercard{padding:12px 10px 6px}}
 .calc{margin-top:12px;padding:11px 14px;border-radius:13px;background:var(--surf2);border:1px solid var(--line)}
 .calc .clbl{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
 .crow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13.5px;padding:4px 0;color:var(--mute)}
@@ -430,7 +459,7 @@ nav span{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:upp
    https://github.com/GulatiAshish/Ledger
    Proprietary. No copying, modification or redistribution without written permission (see LICENSE). */
 const APP={
-  name:'Ledger', version:'1.2.0',
+  name:'Ledger', version:'1.3.1',
   author:'Ashish Gulati',
   repo:'https://github.com/GulatiAshish/Ledger',
   license:'All rights reserved',
@@ -1020,14 +1049,39 @@ function applyTheme(){
     _mq.addEventListener('change',()=>{if(PREFS.theme==='auto'){applyTheme();render();}});}catch{}}
 }
 const goalPct=()=>INCOME.goalPct===undefined||INCOME.goalPct===null?0.2:INCOME.goalPct;
-const incomeFor=k=>{
-  const o=INCOME.overrides&&INCOME.overrides[k];
-  return (o===undefined||o===null)?(INCOME.monthly||0):o;
-};
-const hasIncome=()=>(INCOME.monthly||0)>0||Object.keys(INCOME.overrides||{}).length>0;
+/* Income is effective-dated. A pay change is recorded as {from:'YYYY-MM', monthly}
+   and holds until the next change, so raising today's figure never rewrites what
+   earlier months earned — the same reason accounting ledgers append rather than
+   overwrite. History is sorted ascending; '0000-00' means "since the beginning".
+   Data saved before history existed has only `monthly`, which then applies to
+   every month, exactly as it did before: no migration step, nothing to go wrong. */
+function baseIncomeFor(k){
+  const h=INCOME.history;
+  if(!Array.isArray(h)||!h.length)return INCOME.monthly||0;
+  let v=0;for(const x of h){if(x.from<=k)v=x.monthly;else break;}
+  return v;
+}
+const incomeOverride=k=>{const o=INCOME.overrides&&INCOME.overrides[k];return o===undefined||o===null?null:o;};
+const incomeFor=k=>{const o=incomeOverride(k);return o===null?baseIncomeFor(k):o;};
+const hasIncome=()=>(INCOME.monthly||0)>0||(INCOME.history||[]).some(h=>h.monthly>0)||
+  Object.keys(INCOME.overrides||{}).length>0;
+/* Pure: returns the history with `monthly` taking effect from month k. Later
+   changes are kept; a change that repeats the figure before it is dropped. The
+   very first figure ever entered covers all earlier months too. */
+function incomeFrom(inc,k,monthly){
+  let h=Array.isArray(inc.history)?inc.history.slice():[];
+  if(!h.length&&(inc.monthly||0)>0)h=[{from:'0000-00',monthly:inc.monthly}];
+  const first=!h.length;
+  h=h.filter(x=>x.from!==(first?'0000-00':k));
+  h.push({from:first?'0000-00':k,monthly});
+  h.sort((a,b)=>a.from<b.from?-1:a.from>b.from?1:0);
+  const out=[];for(const x of h)if(!out.length||out[out.length-1].monthly!==x.monthly)out.push(x);
+  return out;
+}
 
 async function saveIncome(next){
   INCOME={...INCOME,...next};
+  DATA_VER++;                       // every memo that reads income (plans, ledger) must recompute
   await DB.put('meta',{k:'income',v:JSON.stringify(INCOME)});
 }
 
@@ -1136,6 +1190,61 @@ function fanSVG(perMonth,lo,hi){
   s+=`<text class="axis" x="0" y="${H+14}">now</text>
       <text class="axis" x="${W}" y="${H+14}" text-anchor="end">12 months</text>`;
   return s+'</svg>';
+}
+
+/* ── Savings ledger ──
+   Every month from the first one tracked, with that month's own income, what was
+   spent and what was kept. Built in one pass over the entries and memoised, so it
+   costs the same at month 3 and month 60. Rows carry a status rather than being
+   dropped, so the table can say why a month isn't counted instead of hiding it:
+     full    counted
+     pre     tracking began part-way through — shown, not counted
+     current running; joins the totals when it ends
+     nolog   no entries at all — spending unknown, so nothing was "saved"
+     noinc   no income figure for it
+   Income is credited on the 1st, so each month is credited its whole income from
+   day one, and the running month shows what is left of it so far. That's also why
+   a month where tracking began late can't be counted: the income arrived on the
+   1st, but the spending before tracking began was never recorded, so its "saved"
+   figure would be mostly fiction. (Months that started within the first few days
+   count as normal — the same 90% coverage rule every comparison uses.)
+   Saved = income − spending. Transfers to savings aren't spending, so they count
+   as saved, matching the savings rate everywhere else. */
+const nextMon=k=>{const[y,m]=k.split('-').map(Number);return m===12?(y+1)+'-01':y+'-'+pad2(m+1);};
+function tally(rows){
+  const c=rows.filter(r=>r.status==='full');
+  const inc=c.reduce((a,r)=>a+r.inc,0), spent=c.reduce((a,r)=>a+r.spent,0);
+  return{n:c.length,inc,spent,saved:inc-spent,rate:inc?(inc-spent)/inc*100:null};
+}
+let _slVer=-1,_slDay='',_sl=null;
+function savingsLedger(){
+  if(_slVer===DATA_VER&&_slDay===today())return _sl;
+  _slVer=DATA_VER;_slDay=today();
+  const ts=trackStart();
+  if(!ts)return(_sl=null);
+  const spent=nullMap(),count=nullMap();
+  for(const e of live()){const k=monKey(e.spent_on);spent[k]=(spent[k]||0)+e.amount;count[k]=(count[k]||0)+1;}
+  const thisMon=monKey(today()), first=monKey(ts), rows=[];   // not `now` — that shadows now()
+  let prevBase=null;
+  for(let k=first;k<=thisMon;k=nextMon(k)){
+    const base=baseIncomeFor(k), ov=incomeOverride(k), full=ov===null?base:ov;
+    const late=k===first&&!fullMonth(k), sp=spent[k]||0, n=count[k]||0;
+    const status=k===thisMon?'current':!n?'nolog':!full?'noinc':late?'pre':'full';
+    rows.push({key:k,inc:full,spent:sp,n,saved:full-sp,rate:full?(full-sp)/full*100:null,status,
+      override:ov!==null,change:prevBase===null||!base||!prevBase||base===prevBase?0:Math.sign(base-prevBase),
+      fromDay:late?parseD(ts).getDate():1});
+    prevBase=base;
+  }
+  const years=[];
+  for(const r of rows.slice().reverse()){
+    const y=r.key.slice(0,4);
+    if(!years.length||years[years.length-1].year!==y)years.push({year:y,rows:[]});
+    years[years.length-1].rows.push(r);
+  }
+  for(const y of years)y.sub=tally(y.rows);
+  const fulls=rows.filter(r=>r.status==='full');
+  const best=fulls.length>1?fulls.reduce((a,r)=>r.saved>a.saved?r:a):null;
+  return(_sl={rows,years,total:tally(rows),best,current:rows.find(r=>r.status==='current')||null});
 }
 
 function savingsHistory(n=12){
@@ -2578,8 +2687,14 @@ function commitSheet(id,draft){
 
 function incomeSheet(opts={}){
   const yearly=S.incPeriod==='year';
-  const shown=yearly?(INCOME.monthly*12):INCOME.monthly;
   const k=opts.k||S.insMonth||monKey(today());
+  // a pay change starts from a month — this one by default, since pay lands on the 1st;
+  // an earlier month can be picked to back-date a change that was entered late
+  const thisMon=monKey(today()), ts=trackStart(), fromList=[];
+  for(let m=ts?monKey(ts):thisMon;m<=thisMon;m=nextMon(m))fromList.unshift(m);
+  const from=opts.from&&fromList.includes(opts.from)?opts.from:thisMon;
+  const baseK=baseIncomeFor(from), shown=yearly?baseK*12:baseK;
+  const hadIncome=hasIncome();
   const ov=INCOME.overrides&&INCOME.overrides[k];
   const amtV=opts.amt!==undefined?opts.amt:(shown?String(Math.round(shown)):'');
   const ovV=opts.ov!==undefined?opts.ov:(ov!==undefined&&ov!==null?String(Math.round(ov)):'');
@@ -2593,7 +2708,9 @@ function incomeSheet(opts={}){
       <label class="lbl" for="incAmt">Take-home ${yearly?'per year':'per month'}</label>
       <input id="incAmt" class="quickin" type="number" inputmode="decimal" min="0"
         value="${esc(amtV)}" placeholder="what actually reaches your account">
-      <div class="hint">Take-home, not gross — tax and deductions never land in your account, so counting them would flatter every ratio here.</div>
+      ${hadIncome&&fromList.length>1?`<div class="fromrow"><label class="lbl" for="incFrom">Changes from</label>
+        <select id="incFrom" class="sel">${fromList.map(m=>`<option value="${m}"${m===from?' selected':''}>${monLabel(m)}${m===thisMon?' (this month)':''}</option>`).join('')}</select></div>`:''}
+      <div class="hint">${hadIncome?`Stays the same every month until you change it. A change counts from the 1st of the month it starts in; earlier months keep what they had. `:''}Take-home, not gross — tax and deductions never land in your account, so counting them would flatter every ratio here.</div>
       <div style="height:18px"></div>
       <label class="lbl" for="incOv">Override for ${monLabel(k)} only</label>
       <input id="incOv" class="quickin" type="number" inputmode="decimal" min="0"
@@ -2612,7 +2729,8 @@ function incomeSheet(opts={}){
     const to=b.dataset.ip;if(to===(yearly?'year':'month'))return;
     const a=parseFloat($('#incAmt',v).value);
     const amt=a>0?String(Math.round(to==='year'?a*12:a/12)):'';
-    const keep={k,amt,ov:$('#incOv',v).value,goal:$('#incGoal',v).value};
+    const fs=$('#incFrom',v);
+    const keep={k,amt,ov:$('#incOv',v).value,goal:$('#incGoal',v).value,from:fs?fs.value:from};
     S.incPeriod=to;closeSheet();incomeSheet(keep);});
   /* Live split. The same arithmetic as the daily allowance, run on whatever is
      typed, so the effect of a savings percentage is visible before saving it. */
@@ -2644,13 +2762,16 @@ function incomeSheet(opts={}){
     else{const n=parseFloat(ovRaw);if(n>0)overrides[k]=n;}
     const gRaw=parseFloat($('#incGoal',v).value);
     const goal=isFinite(gRaw)?Math.min(90,Math.max(0,gRaw))/100:goalPct();
-    try{ await saveIncome({monthly,period:S.incPeriod,overrides,goalPct:goal}); }
+    const fs=$('#incFrom',v);
+    const history=incomeFrom(INCOME,fs?fs.value:from,monthly);
+    try{ await saveIncome({monthly:history.length?history[history.length-1].monthly:0,history,
+      period:S.incPeriod,overrides,goalPct:goal}); }
     catch(err){ console.error(err); return toast('Could not save'); }
     closeSheet();render();toast('Income saved');
   };
   const cl=$('#incClear',v);
   if(cl)cl.onclick=async()=>{
-    try{ await saveIncome({monthly:0,overrides:{}}); }
+    try{ await saveIncome({monthly:0,overrides:{},history:[]}); }
     catch(err){ console.error(err); return toast('Could not save'); }
     closeSheet();render();toast('Income removed');
   };
@@ -2676,6 +2797,55 @@ function allowanceCal(k){
       <b>${d}</b><span>${P.spent?compact(P.spent):''}</span></button>`;
   }
   return{html:`<div class="cal">${DOW.map(x=>`<em>${x[0]}</em>`).join('')}${cells}</div>`,under,counted};
+}
+
+/* Rupees for a table cell: full Indian grouping, so the figure is exact; past
+   a crore it switches to Cr so a column never overflows a phone. */
+const cellAmt=n=>{const a=Math.abs(n),s=n<0?'−':'';return a>=1e7?s+(a/1e7).toFixed(2)+'Cr':s+money(a);};
+const cellPct=p=>p===null?'':`<span class="${p<0?'neg':''}">${p<0?'−':''}${Math.abs(p).toFixed(0)}%</span>`;
+function ledgerSection(){
+  const L=savingsLedger();
+  if(!L||!L.rows.length)return '';
+  const multi=L.years.length>1;
+  // newest year open; the one before too while the new year is young
+  if(!S.yrOpen){S.yrOpen=new Set([L.years[0].year]);
+    if(L.years[1]&&L.years[0].rows.length<3)S.yrOpen.add(L.years[1].year);}
+  const savedCell=r=>r.status==='current'?(r.inc?`<td class="num run">${cellAmt(r.saved)}</td><td class="num pct run">${cellPct(r.rate)}</td>`
+      :`<td colspan="2" class="note">no income set</td>`)
+    :r.status==='pre'?`<td colspan="2" class="note">part-tracked</td>`
+    :r.status==='nolog'?`<td colspan="2" class="note">not logged</td>`
+    :r.status==='noinc'?`<td colspan="2" class="note">no income set</td>`
+    :`<td class="num ${r.saved<0?'neg':'pos'}">${cellAmt(r.saved)}</td><td class="num pct">${cellPct(r.rate)}</td>`;
+  const mark=r=>r.override?'<i class="mk" title="one-off figure">•</i>':r.change>0?'<i class="mk up" title="income rose">▲</i>':r.change<0?'<i class="mk dn" title="income fell">▼</i>':'';
+  const monthRow=r=>`<tr class="mo ${r.status}" data-lmon="${r.key}">
+      <th scope="row">${MON[+r.key.slice(5)-1]}${multi?'':` <span class="yy">'${r.key.slice(2,4)}</span>`}${r.status==='pre'?'<sup>†</sup>':''}${r.status==='current'?'<span class="tn">so far</span>':''}</th>
+      <td class="num">${r.inc?mark(r)+cellAmt(r.inc):'—'}</td>
+      <td class="num">${r.n?cellAmt(r.spent):'—'}</td>${savedCell(r)}</tr>`;
+  const sumCells=t=>t.n?`<td class="num">${cellAmt(t.inc)}</td><td class="num">${cellAmt(t.spent)}</td>
+      <td class="num ${t.saved<0?'neg':'pos'}">${cellAmt(t.saved)}</td><td class="num pct">${cellPct(t.rate)}</td>`
+      :`<td colspan="4" class="note">nothing complete yet</td>`;
+  const body=multi?L.years.map(y=>{const open=S.yrOpen.has(y.year);
+      return `<tbody><tr class="yr" data-yr="${y.year}" role="button" tabindex="0" aria-expanded="${open}">
+        <th scope="row"><span class="chev">${open?'▾':'▸'}</span>${y.year}</th>${sumCells(y.sub)}</tr>
+        ${open?y.rows.map(monthRow).join(''):''}</tbody>`;}).join('')
+    :`<tbody>${L.years[0].rows.map(monthRow).join('')}</tbody>`;
+  const T=L.total, notes=[];
+  if(L.rows.some(r=>r.change||r.override))notes.push('▲ ▼ pay changed from that month. • a one-off figure for that month only.');
+  const pre=L.rows.find(r=>r.status==='pre');
+  if(pre)notes.push(`† Tracking began on ${pre.fromDay} ${MON[+pre.key.slice(5)-1]}, so most of ${monLabel(pre.key)}'s spending was never recorded. It's shown, but left out of the totals.`);
+  if(L.current&&L.current.inc)notes.push(`${monLabel(L.current.key)} is running: its income counts from the 1st, so the saved figure is what's left so far and comes down as you spend. It joins the totals when the month ends.`);
+  notes.push('Saved is income minus spending. Money moved to a savings category counts as saved, not spent.');
+  return `<div class="sec">
+    <span class="lbl">Saved, month by month</span>
+    <div class="card ledgercard"><table class="ledger">
+      <thead><tr><th scope="col">${multi?'':'Month'}</th><th scope="col">Income</th><th scope="col">Spent</th>
+        <th scope="col">Saved</th><th scope="col" class="pct">%</th></tr></thead>
+      ${body}
+      <tfoot><tr><th scope="row">Total${T.n?`<span class="tn">${T.n} mo</span>`:''}</th>${sumCells(T)}</tr></tfoot>
+    </table></div>
+    ${T.n?`<div class="hint" style="padding:0 18px">Average <b>₹${money(T.saved/T.n)}</b> a month${L.best?` · best ${monLabel(L.best.key)}, ₹${money(L.best.saved)}`:''}. Tap a month to open it.</div>`:''}
+    <div class="lnotes">${notes.join('<br>')}</div>
+  </div>`;
 }
 
 function rateBar(rates){
@@ -2844,6 +3014,8 @@ function vMoney(){
     ${secNote('Share of income not spent. Grey stubs are months with no income figure recorded.')}
     <div class="card pad14">${rateBar(hist)}</div>
   </div>
+
+  ${ledgerSection()}
 
   ${cats.length?`<div class="sec">
     <span class="lbl">Categories as a share of income</span>
@@ -3227,7 +3399,10 @@ function cleanIncome(x){
     for(const k of Object.keys(x.overrides))if(/^\d{4}-\d{2}$/.test(k)&&isFinite(x.overrides[k])&&x.overrides[k]>0)ov[k]=+x.overrides[k];
   const out={monthly:+x.monthly,period:x.period==='year'?'year':'month',overrides:ov};
   if(isFinite(x.goalPct)&&x.goalPct>=0&&x.goalPct<=0.9)out.goalPct=+x.goalPct;
-  return(out.monthly>0||Object.keys(ov).length)?out:null;
+  if(Array.isArray(x.history))out.history=x.history
+    .filter(h=>h&&/^(\d{4}-\d{2}|0000-00)$/.test(h.from)&&isFinite(h.monthly)&&h.monthly>=0)
+    .map(h=>({from:h.from,monthly:+h.monthly})).sort((a,b)=>a.from<b.from?-1:a.from>b.from?1:0);
+  return(out.monthly>0||Object.keys(ov).length||(out.history||[]).some(h=>h.monthly>0))?out:null;
 }
 async function doImport(file){
   if(READONLY)return toast('Read-only — reload to leave the backup view');
@@ -3497,6 +3672,11 @@ function bind(){
   document.querySelectorAll('[data-ann]').forEach(b=>b.onclick=()=>{S.rannual=b.dataset.ann==='1';buzz();render();});
   if(S.view==='money'){
     const ib=$('#incBtn');if(ib)ib.onclick=()=>incomeSheet();
+    document.querySelectorAll('[data-yr]').forEach(b=>{const go=()=>{const y=b.dataset.yr;
+        S.yrOpen.has(y)?S.yrOpen.delete(y):S.yrOpen.add(y);buzz();render();};
+      b.onclick=go;b.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go();}};});
+    document.querySelectorAll('[data-lmon]').forEach(b=>b.onclick=()=>{
+      S.insMonth=b.dataset.lmon;buzz();render();window.scrollTo({top:0,behavior:'smooth'});});
     document.querySelectorAll('[data-day]').forEach(r=>r.onclick=()=>{
       const d=r.dataset.day;
       S.date=d;S.dateManual=true;S.view='add';S.mode='quick';

@@ -1,5 +1,7 @@
 # Ledger
 
+*by Ashish Gulati*
+
 A daily expense tracker that runs entirely in your browser. No account, no server, no sync — your data stays on your device.
 
 Install it to your Android home screen and it behaves like a native app: opens instantly, works with no signal, and records expenses offline.
@@ -43,6 +45,8 @@ Install it to your Android home screen and it behaves like a native app: opens i
 
 **Income (optional)**
 - Add take-home income and a savings goal (20% by default) to get savings rate, the daily allowance, and every category as a share of income.
+- Income is credited on the 1st and carries forward month to month until you change it. A change applies from the month you pick (this month by default), and earlier months keep what they earned. One-off months (a bonus, a gap) can be set separately.
+- **Saved, month by month** — a table of income, spent, saved and savings rate for every month, grouped by year with subtotals and an all-time total. Past years fold into one row, so it stays short after years of use.
 - Projects annual savings from your recent pace, as a range rather than a single number.
 - Shows what trimming each category by 10% would be worth over a year.
 
@@ -82,10 +86,77 @@ Note that all project sites under one `github.io` account share a single origin,
 
 ---
 
+## How it works
+
+**No build step and no dependencies.** One HTML file with inline CSS and JS, a service worker, three self-hosted `.woff2` fonts, and some PNGs. Charts are hand-written SVG. The whole install is about 200 KB.
+
+**Storage** is IndexedDB with a schema shaped deliberately like SQL, so it ports without a migration:
+
+```sql
+CREATE TABLE expenses (
+  id          TEXT PRIMARY KEY,      -- client-generated uuid
+  amount      REAL NOT NULL CHECK (amount > 0),
+  spent_on    DATE NOT NULL,         -- local YYYY-MM-DD, never a timestamp
+  category_id TEXT NOT NULL REFERENCES categories(id),
+  description TEXT,
+  created_at  TIMESTAMPTZ NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL,  -- last-write-wins key for any future sync
+  deleted_at  TIMESTAMPTZ            -- soft delete, so deletions can replicate
+);
+```
+
+Two choices worth noting: `spent_on` is a bare date, not a timestamp, because timezone bugs in expense apps almost always trace back to storing `NOW()` and rendering it elsewhere. And deletes are soft, because a hard delete can't replicate — the other side has no way to learn a row disappeared.
+
+**Offline** is cache-first, not network-first. Network-first is fine when you're fully offline (the fetch fails fast), but on weak signal it can hang for tens of seconds — meaning the app would open slower on a bad connection than on none at all. Cache-first opens instantly in every condition and picks up a new deploy on the following launch.
+
+**Categorisation** is a weighted bag-of-words vote: seed keywords provide the cold start, and every manual correction adds weighted votes for the words in that description. It only learns from confirmed choices, never its own guesses.
+
+**Recurring detection** groups entries by description signature, takes the median gap, and matches it against weekly through yearly cadences. It also requires the gaps to be regular, not just the right size on average, and asks for more occurrences at shorter cadences, so a daily habit isn't mistaken for a subscription.
+
+**The daily allowance** is the lower of two rates: what's left spread evenly over the month, and what's left spread over the days remaining. Taking the lower one means saving early doesn't turn into a large "free" allowance at month-end. The figure is shown as a range, because research on budgeting apps found that a single precise remaining-budget number tends to increase spending.
+
+**Statistics** are robust rather than naive. Spending is strongly right-skewed, so the app reports medians with the mean beside them, and detects outliers on the log of the amount with median ± MAD rather than mean ± standard deviation — the mean and SD are themselves distorted by the outliers you're looking for.
+
+`DESIGN.md` covers the reasoning behind the interface and analytics in more depth.
+
+---
+
+## Development
+
+Edit `index.html` directly — there is nothing to compile.
+
+**After any change, bump the cache version in `sw.js`:**
+
+```js
+const CACHE = 'ledger-v21';   // → 'ledger-v22'
+```
+
+Without this the phone keeps serving the old copy. The new version appears on the *second* launch after deploying — that's the deliberate cost of cache-first loading.
+
+The source carries `FUTURE —` comments at the places they concern, covering schema migrations, encryption at rest, two-way sync, and other extensions.
+
+**Checks:**
+
+```bash
+npx eslint index.html      # after extracting the <script> block
+```
+
+The repo has no test runner wired up; the property suite used during development covers date arithmetic, quantiles, and cross-view invariants.
+
+---
+
+## Roadmap
+
+- Separate logging mode for periodic entries — investments, EMIs, premiums — recorded monthly rather than daily.
+- Postgres replica with real two-way sync, once the schema has settled.
+- Native Android build reusing the same schema in Room.
+
+---
+
 ## License
 
 **Copyright © 2026 Ashish Gulati. All rights reserved.**
 
 The source is public to read, not to reuse. You may use the app at the address above for your own expenses. Copying, hosting, modifying, redesigning or redistributing it — in whole or in part — requires my prior written permission. To ask, contact me through [GitHub](https://github.com/GulatiAshish).
 
-See [`LICENSE`](LICENSE) for the full terms. 
+See [`LICENSE`](LICENSE) for the full terms. Versions before 1.1.1 were released under Apache 2.0.
